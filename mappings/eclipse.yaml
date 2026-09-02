@@ -1,0 +1,26 @@
+platform: eclipse
+version: "v0.1-demo"
+dialect: "ECLIPSE_METRIC_OPM_2025.10_DEMO_INCLUDE"
+mappings:
+  rock.compressibility:
+    target_type: ROCK
+  rock.reference_pressure:
+    target_type: ROCK
+  fluid.oil.density:
+    target_type: DENSITY
+  fluid.water.density:
+    target_type: DENSITY
+  fluid.gas.density:
+    target_type: DENSITY
+  fluid.oil.pvt:
+    target_type: PVDO
+  fluid.gas.pvt:
+    target_type: PVDG
+  scal.relative_permeability:
+    target_type: SWOF
+  well.control.liquid_rate:
+    target_type: WCONPROD
+  well.control.water_injection_rate:
+    target_type: WCONINJE
+  schedule.duration:
+    target_type: TSTEP

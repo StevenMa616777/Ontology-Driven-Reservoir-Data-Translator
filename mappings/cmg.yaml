@@ -1,0 +1,18 @@
+platform: cmg
+version: "v0.1-demo"
+dialect: "CMG_IMEX_STYLE_DEMO_CONTROL_FRAGMENT_UNVERIFIED_VERSION"
+mappings:
+  well:
+    target_type: WELL
+  well.producer:
+    target_type: PRODUCER
+  well.water_injector:
+    target_type: INJECTOR
+  well.control.liquid_rate:
+    target_type: OPERATE
+  well.control.water_injection_rate:
+    target_type: OPERATE
+  well.constraint.minimum_bhp:
+    target_type: OPERATE
+  well.constraint.maximum_bhp:
+    target_type: OPERATE

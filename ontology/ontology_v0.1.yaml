@@ -1,0 +1,13 @@
+ontology:
+  version: "0.1.0"
+  name: Reservoir Simulation Company Ontology
+  namespace: reservoir_simulation
+  domain: ReservoirSimulation
+  convention_file: conventions_v0.1.yaml
+  concept_files:
+    - concepts/rock.yaml
+    - concepts/fluid.yaml
+    - concepts/scal.yaml
+    - concepts/well.yaml
+    - concepts/schedule.yaml
+    - concepts/condition.yaml

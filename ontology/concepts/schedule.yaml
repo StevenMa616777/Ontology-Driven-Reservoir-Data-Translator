@@ -1,0 +1,54 @@
+concepts:
+  - concept_id: schedule
+    name: Simulation Schedule
+    parent: reservoir_simulation
+    description: Time configuration and report cadence for a simulation case.
+    value_type: object
+    dimension: null
+    canonical_unit: null
+    aliases:
+      - simulation schedule
+      - schedule
+      - run schedule
+      - 模拟时间表
+      - 模拟日程
+    constraints: {}
+    relationships: {}
+
+  - concept_id: schedule.duration
+    name: Simulation Duration
+    parent: schedule
+    description: Total elapsed duration requested for the simulation.
+    value_type: float
+    dimension: time
+    canonical_unit: day
+    aliases:
+      - simulation duration
+      - run duration
+      - total simulation time
+      - 模拟周期
+      - 模拟时长
+    constraints:
+      exclusive_minimum: 0
+    relationships:
+      configures:
+        - schedule
+
+  - concept_id: schedule.report_interval
+    name: Report Interval
+    parent: schedule
+    description: Requested interval between simulation report steps.
+    value_type: duration
+    dimension: time
+    canonical_unit: day
+    aliases:
+      - report interval
+      - report step
+      - reporting frequency
+      - 报告间隔
+      - 输出间隔
+    constraints:
+      exclusive_minimum: 0
+    relationships:
+      configures:
+        - schedule

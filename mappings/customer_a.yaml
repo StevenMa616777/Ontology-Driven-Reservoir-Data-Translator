@@ -1,0 +1,11 @@
+mapping_version: "0.1.0"
+source_system: client_a
+entries:
+  - source_term: Well_ID
+    concept_id: well
+  - source_term: PROD
+    concept_id: well.producer
+  - source_term: LiquidRate
+    concept_id: well.control.liquid_rate
+  - source_term: MinBHP
+    concept_id: well.constraint.minimum_bhp

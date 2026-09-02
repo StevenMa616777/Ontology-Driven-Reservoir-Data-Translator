@@ -1,0 +1,345 @@
+concepts:
+  - concept_id: fluid
+    name: Fluid System
+    parent: reservoir_simulation
+    description: Fluid phases and pressure-volume-temperature properties.
+    value_type: object
+    dimension: null
+    canonical_unit: null
+    aliases:
+      - fluid system
+      - fluids
+      - PVT system
+      - 流体系统
+      - 流体性质
+    constraints: {}
+    relationships: {}
+
+  - concept_id: fluid.oil
+    name: Oil Phase
+    parent: fluid
+    description: Oil phase in the reservoir fluid system.
+    value_type: object
+    dimension: null
+    canonical_unit: null
+    aliases:
+      - oil
+      - oil phase
+      - crude oil
+      - 油相
+      - 原油
+    constraints: {}
+    relationships: {}
+
+  - concept_id: fluid.oil.density
+    name: Oil Density
+    parent: fluid.oil
+    description: Oil mass density at the stated reference condition.
+    value_type: float
+    dimension: density
+    canonical_unit: kg/m3
+    aliases:
+      - oil density
+      - crude oil density
+      - rho oil
+      - 油密度
+      - 原油密度
+    constraints:
+      exclusive_minimum: 0
+    relationships:
+      applies_to:
+        - fluid.oil
+      referenced_at:
+        - condition.reference
+
+  - concept_id: fluid.oil.pvt
+    name: Oil PVT
+    parent: fluid.oil
+    description: Platform-independent oil PVT table or constant model.
+    value_type: table
+    dimension: null
+    canonical_unit: null
+    aliases:
+      - oil PVT
+      - oil property table
+      - 油相PVT
+      - 原油PVT
+    constraints: {}
+    relationships:
+      applies_to:
+        - fluid.oil
+
+  - concept_id: fluid.oil.pvt.pressure
+    name: Oil PVT Pressure
+    parent: fluid.oil.pvt
+    description: Pressure coordinate of an oil PVT point.
+    value_type: float
+    dimension: pressure
+    canonical_unit: bar
+    aliases:
+      - oil PVT pressure
+      - oil pressure
+      - Po
+      - 油相PVT压力
+    constraints:
+      exclusive_minimum: 0
+    relationships:
+      coordinate_for:
+        - fluid.oil.pvt
+
+  - concept_id: fluid.oil.pvt.formation_volume_factor
+    name: Oil Formation Volume Factor
+    parent: fluid.oil.pvt
+    description: Oil formation volume factor at a declared pressure.
+    value_type: float
+    dimension: volume_ratio
+    canonical_unit: rm3/sm3
+    aliases:
+      - oil formation volume factor
+      - oil FVF
+      - Bo
+      - 原油体积系数
+      - 油体积系数
+    constraints:
+      exclusive_minimum: 0
+    relationships:
+      dependent_on:
+        - fluid.oil.pvt.pressure
+
+  - concept_id: fluid.oil.pvt.viscosity
+    name: Oil Viscosity
+    parent: fluid.oil.pvt
+    description: Oil dynamic viscosity at a declared pressure.
+    value_type: float
+    dimension: dynamic_viscosity
+    canonical_unit: cP
+    aliases:
+      - oil viscosity
+      - mu oil
+      - MUO
+      - 油粘度
+      - 原油粘度
+    constraints:
+      exclusive_minimum: 0
+    relationships:
+      dependent_on:
+        - fluid.oil.pvt.pressure
+
+  - concept_id: fluid.water
+    name: Water Phase
+    parent: fluid
+    description: Water phase in the reservoir fluid system.
+    value_type: object
+    dimension: null
+    canonical_unit: null
+    aliases:
+      - water
+      - water phase
+      - brine
+      - 水相
+      - 地层水
+    constraints: {}
+    relationships: {}
+
+  - concept_id: fluid.water.density
+    name: Water Density
+    parent: fluid.water
+    description: Water mass density at the stated reference condition.
+    value_type: float
+    dimension: density
+    canonical_unit: kg/m3
+    aliases:
+      - water density
+      - brine density
+      - rho water
+      - 水密度
+      - 地层水密度
+    constraints:
+      exclusive_minimum: 0
+    relationships:
+      applies_to:
+        - fluid.water
+      referenced_at:
+        - condition.reference
+
+  - concept_id: fluid.water.pvt
+    name: Water PVT
+    parent: fluid.water
+    description: Platform-independent water PVT table or constant model.
+    value_type: table
+    dimension: null
+    canonical_unit: null
+    aliases:
+      - water PVT
+      - water property table
+      - 水相PVT
+      - 地层水PVT
+    constraints: {}
+    relationships:
+      applies_to:
+        - fluid.water
+
+  - concept_id: fluid.water.pvt.pressure
+    name: Water PVT Pressure
+    parent: fluid.water.pvt
+    description: Pressure coordinate of a water PVT point.
+    value_type: float
+    dimension: pressure
+    canonical_unit: bar
+    aliases:
+      - water PVT pressure
+      - water pressure
+      - Pw
+      - 水相PVT压力
+    constraints:
+      exclusive_minimum: 0
+    relationships:
+      coordinate_for:
+        - fluid.water.pvt
+
+  - concept_id: fluid.water.pvt.formation_volume_factor
+    name: Water Formation Volume Factor
+    parent: fluid.water.pvt
+    description: Water formation volume factor at a declared pressure.
+    value_type: float
+    dimension: volume_ratio
+    canonical_unit: rm3/sm3
+    aliases:
+      - water formation volume factor
+      - water FVF
+      - Bw
+      - 水体积系数
+    constraints:
+      exclusive_minimum: 0
+    relationships:
+      dependent_on:
+        - fluid.water.pvt.pressure
+
+  - concept_id: fluid.water.pvt.viscosity
+    name: Water Viscosity
+    parent: fluid.water.pvt
+    description: Water dynamic viscosity at a declared pressure.
+    value_type: float
+    dimension: dynamic_viscosity
+    canonical_unit: cP
+    aliases:
+      - water viscosity
+      - mu water
+      - MUW
+      - 水粘度
+      - 地层水粘度
+    constraints:
+      exclusive_minimum: 0
+    relationships:
+      dependent_on:
+        - fluid.water.pvt.pressure
+
+  - concept_id: fluid.gas
+    name: Gas Phase
+    parent: fluid
+    description: Gas phase in the reservoir fluid system.
+    value_type: object
+    dimension: null
+    canonical_unit: null
+    aliases:
+      - gas
+      - gas phase
+      - natural gas
+      - 气相
+      - 天然气
+    constraints: {}
+    relationships: {}
+
+  - concept_id: fluid.gas.density
+    name: Gas Density
+    parent: fluid.gas
+    description: Gas mass density at the stated reference condition.
+    value_type: float
+    dimension: density
+    canonical_unit: kg/m3
+    aliases:
+      - gas density
+      - natural gas density
+      - rho gas
+      - 气体密度
+      - 气相密度
+    constraints:
+      exclusive_minimum: 0
+    relationships:
+      applies_to:
+        - fluid.gas
+      referenced_at:
+        - condition.reference
+
+  - concept_id: fluid.gas.pvt
+    name: Gas PVT
+    parent: fluid.gas
+    description: Platform-independent gas PVT table or constant model.
+    value_type: table
+    dimension: null
+    canonical_unit: null
+    aliases:
+      - gas PVT
+      - gas property table
+      - 气相PVT
+      - 天然气PVT
+    constraints: {}
+    relationships:
+      applies_to:
+        - fluid.gas
+
+  - concept_id: fluid.gas.pvt.pressure
+    name: Gas PVT Pressure
+    parent: fluid.gas.pvt
+    description: Pressure coordinate of a gas PVT point.
+    value_type: float
+    dimension: pressure
+    canonical_unit: bar
+    aliases:
+      - gas PVT pressure
+      - gas pressure
+      - Pg
+      - 气相PVT压力
+    constraints:
+      exclusive_minimum: 0
+    relationships:
+      coordinate_for:
+        - fluid.gas.pvt
+
+  - concept_id: fluid.gas.pvt.formation_volume_factor
+    name: Gas Formation Volume Factor
+    parent: fluid.gas.pvt
+    description: Gas formation volume factor at a declared pressure.
+    value_type: float
+    dimension: volume_ratio
+    canonical_unit: rm3/sm3
+    aliases:
+      - gas formation volume factor
+      - gas FVF
+      - Bg
+      - 气体体积系数
+      - 气体积系数
+    constraints:
+      exclusive_minimum: 0
+    relationships:
+      dependent_on:
+        - fluid.gas.pvt.pressure
+
+  - concept_id: fluid.gas.pvt.viscosity
+    name: Gas Viscosity
+    parent: fluid.gas.pvt
+    description: Gas dynamic viscosity at a declared pressure.
+    value_type: float
+    dimension: dynamic_viscosity
+    canonical_unit: cP
+    aliases:
+      - gas viscosity
+      - mu gas
+      - MUG
+      - 气体粘度
+      - 气相粘度
+    constraints:
+      exclusive_minimum: 0
+    relationships:
+      dependent_on:
+        - fluid.gas.pvt.pressure

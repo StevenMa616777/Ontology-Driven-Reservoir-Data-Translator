@@ -1,0 +1,131 @@
+convention:
+  version: "0.1.0"
+
+  concept_id_pattern: '^[a-z][a-z0-9]*(?:_[a-z0-9]+)*(?:\.[a-z][a-z0-9]*(?:_[a-z0-9]+)*)*$'
+  root_concepts:
+    - reservoir_simulation
+
+  hierarchy_exceptions:
+    well.water_injector: Retained for MVP compatibility; migrate to a temporal well.role namespace.
+    well.gas_injector: Retained for MVP compatibility; migrate to a temporal well.role namespace.
+
+  value_types:
+    - object
+    - entity
+    - entity_type
+    - float
+    - integer
+    - string
+    - boolean
+    - enum
+    - table
+    - duration
+    - date
+    - datetime
+
+  lifecycle_statuses:
+    - active
+    - deprecated
+
+  dimensions:
+    dimensionless:
+      canonical_units: [fraction]
+    pressure:
+      canonical_units: [bar]
+    temperature:
+      canonical_units: [degC]
+    inverse_pressure:
+      canonical_units: [1/bar]
+    dynamic_viscosity:
+      canonical_units: [cP]
+    density:
+      canonical_units: [kg/m3]
+    time:
+      canonical_units: [day]
+    volume_ratio:
+      canonical_units: [rm3/sm3]
+    surface_liquid_volume_per_time:
+      canonical_units: [m3/day]
+    surface_water_volume_per_time:
+      canonical_units: [m3/day]
+
+  constraint_keys:
+    - minimum
+    - maximum
+    - exclusive_minimum
+    - exclusive_maximum
+    - minimum_points
+    - maximum_points
+
+  relationships:
+    applies_to:
+      description: A property, control, or constraint can be applied to an entity or entity type.
+      source_value_types: [object, float, integer, enum, table, duration]
+      target_value_types: [object, entity, entity_type]
+      allow_multiple: true
+      inverse: null
+    dependent_on:
+      description: A dependent variable depends on one or more coordinate or condition concepts.
+      source_value_types: [float, integer, duration]
+      target_value_types: [float, integer, date, datetime]
+      allow_multiple: true
+      inverse: null
+    coordinate_for:
+      description: A concept acts as a coordinate or index for a table or functional relationship.
+      source_value_types: [float, integer, date, datetime]
+      target_value_types: [table]
+      allow_multiple: true
+      inverse: null
+    referenced_at:
+      description: A physical property is defined at a reference condition or reference value.
+      source_value_types: [float, integer]
+      target_value_types: [object, float, integer]
+      allow_multiple: true
+      inverse: reference_for
+    reference_for:
+      description: A reference condition or value defines the condition for another property.
+      source_value_types: [object, float, integer]
+      target_value_types: [float, integer]
+      allow_multiple: true
+      inverse: referenced_at
+    configures:
+      description: A configuration value configures a structural simulation concept.
+      source_value_types: [float, integer, enum, duration, date, datetime]
+      target_value_types: [object, entity]
+      allow_multiple: true
+      inverse: null
+    has_property:
+      description: An entity or structural concept owns a stable semantic property.
+      source_value_types: [object, entity]
+      target_value_types: [object, float, integer, string, boolean, enum, table, duration]
+      allow_multiple: true
+      inverse: null
+    has_role:
+      description: An entity has a role that may vary over time.
+      source_value_types: [entity]
+      target_value_types: [entity_type]
+      allow_multiple: true
+      inverse: null
+    valid_during:
+      description: A role, control, or fact is valid during a time interval or at a date.
+      source_value_types: [object, entity_type, float, integer, enum]
+      target_value_types: [duration, date, datetime]
+      allow_multiple: true
+      inverse: null
+
+  source_specific_tokens:
+    - eclipse
+    - cmg
+    - tnavigator
+    - petrel
+    - customer
+    - client
+    - project
+
+  suspicious_alias_patterns:
+    - pattern: '^[-+]?\d+(?:\.\d+)?(?:\s|$)'
+      description: Alias appears to start with a concrete numeric value.
+    - pattern: '^(quarterly|monthly|daily|yearly|每季度|每月|每日|每年)$'
+      description: Alias appears to be a schedule value rather than a synonym.
+    - pattern: '^(bar|psi|kpa|mpa|cp|pa\.s|kg/m3|g/cm3|m3/day|bbl/day|day|month|year)$'
+      description: Alias appears to be a unit rather than a semantic synonym.

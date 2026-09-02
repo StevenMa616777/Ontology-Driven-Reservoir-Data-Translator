@@ -1,0 +1,187 @@
+concepts:
+  - concept_id: well
+    name: Well
+    parent: reservoir_simulation
+    description: A named well participating in the simulation schedule.
+    value_type: entity
+    dimension: null
+    canonical_unit: null
+    aliases:
+      - well
+      - well name
+      - well ID
+      - 井
+      - 井名
+      - 井号
+    constraints: {}
+    relationships: {}
+
+  - concept_id: well.producer
+    name: Producer
+    parent: well
+    description: A well configured to produce reservoir fluids.
+    value_type: entity_type
+    dimension: null
+    canonical_unit: null
+    aliases:
+      - producer
+      - production well
+      - 生产井
+      - 采油井
+    constraints: {}
+    relationships: {}
+
+  - concept_id: well.injector
+    name: Injector
+    parent: well
+    description: A well configured to inject fluid into the reservoir.
+    value_type: entity_type
+    dimension: null
+    canonical_unit: null
+    aliases:
+      - injector
+      - injection well
+      - 注入井
+      - 注井
+    constraints: {}
+    relationships: {}
+
+  - concept_id: well.water_injector
+    name: Water Injector
+    parent: well.injector
+    description: An injection well whose injected phase is water.
+    value_type: entity_type
+    dimension: null
+    canonical_unit: null
+    aliases:
+      - water injector
+      - water injection well
+      - 注水井
+      - 水注入井
+    constraints: {}
+    relationships: {}
+
+  - concept_id: well.gas_injector
+    name: Gas Injector
+    parent: well.injector
+    description: An injection well whose injected phase is gas.
+    value_type: entity_type
+    dimension: null
+    canonical_unit: null
+    aliases:
+      - gas injector
+      - gas injection well
+      - 注气井
+      - 气注入井
+    constraints: {}
+    relationships: {}
+
+  - concept_id: well.control
+    name: Well Control
+    parent: well
+    description: Operating target applied to a well at a scheduled time.
+    value_type: object
+    dimension: null
+    canonical_unit: null
+    aliases:
+      - well control
+      - operating control
+      - control mode
+      - 井控
+      - 生产制度
+    constraints: {}
+    relationships: {}
+
+  - concept_id: well.control.liquid_rate
+    name: Liquid Rate Control
+    parent: well.control
+    description: Surface liquid production-rate target for a producer.
+    value_type: float
+    dimension: surface_liquid_volume_per_time
+    canonical_unit: m3/day
+    aliases:
+      - liquid rate
+      - liquid production rate
+      - 定液
+      - 定液量
+      - 日产液
+      - 日产液量
+    constraints:
+      minimum: 0
+    relationships:
+      applies_to:
+        - well.producer
+
+  - concept_id: well.control.water_injection_rate
+    name: Water Injection Rate Control
+    parent: well.control
+    description: Surface water injection-rate target for a water injector.
+    value_type: float
+    dimension: surface_water_volume_per_time
+    canonical_unit: m3/day
+    aliases:
+      - water injection rate
+      - water rate target
+      - 注水量
+      - 日注水量
+      - 注水排量
+    constraints:
+      minimum: 0
+    relationships:
+      applies_to:
+        - well.water_injector
+
+  - concept_id: well.constraint
+    name: Well Constraint
+    parent: well
+    description: Safety or operating bound attached to a well control.
+    value_type: object
+    dimension: null
+    canonical_unit: null
+    aliases:
+      - well constraint
+      - operating limit
+      - 井约束
+      - 操作限制
+    constraints: {}
+    relationships: {}
+
+  - concept_id: well.constraint.minimum_bhp
+    name: Minimum Bottom-Hole Pressure
+    parent: well.constraint
+    description: Minimum permitted flowing bottom-hole pressure for a producer.
+    value_type: float
+    dimension: pressure
+    canonical_unit: bar
+    aliases:
+      - minimum BHP
+      - MinBHP
+      - BHP minimum
+      - pressure floor
+      - 最低井底流压
+      - 井底流压下限
+    constraints:
+      exclusive_minimum: 0
+    relationships:
+      applies_to:
+        - well.producer
+
+  - concept_id: well.constraint.maximum_bhp
+    name: Maximum Bottom-Hole Pressure
+    parent: well.constraint
+    description: Maximum permitted bottom-hole pressure for an injector.
+    value_type: float
+    dimension: pressure
+    canonical_unit: bar
+    aliases:
+      - maximum BHP
+      - MaxBHP
+      - BHP maximum
+      - pressure ceiling
+      - 最高井底流压
+      - 井底压力上限
+    constraints:
+      exclusive_minimum: 0
+    relationships:
+      applies_to:
+        - well.injector

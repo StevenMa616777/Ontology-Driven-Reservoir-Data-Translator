@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+.DS_Store
+LLM/**/api_key
+LLM/**/api_key.*
+artifacts/deepseek_semantic_smoke*.json

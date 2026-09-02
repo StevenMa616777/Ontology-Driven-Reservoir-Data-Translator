@@ -1,0 +1,7 @@
+{
+  "well_name": "A15",
+  "operation": "production",
+  "control_mode": "LRAT",
+  "target": 500,
+  "pressure_floor": 80
+}

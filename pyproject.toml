@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reservoir-data-translator"
+version = "0.1.0"
+description = "Ontology-driven translation foundation for reservoir simulation data."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.116,<1",
+    "httpx>=0.28,<1",
+    "openpyxl>=3.1.5,<4",
+    "Pint>=0.24,<1",
+    "pydantic>=2.10,<3",
+    "PyYAML>=6.0.2,<7",
+    "uvicorn>=0.35,<1",
+]
+
+[project.scripts]
+ontology-validate = "reservoir_data_translator.ontology.validator:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3,<10",
+    "pytest-asyncio>=0.25,<2",
+    "pytest-cov>=6,<8",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["reservoir_data_translator"]

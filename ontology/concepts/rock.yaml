@@ -1,0 +1,68 @@
+concepts:
+  - concept_id: reservoir_simulation
+    name: Reservoir Simulation
+    parent: null
+    description: Root concept for the reservoir simulation domain.
+    value_type: object
+    dimension: null
+    canonical_unit: null
+    aliases:
+      - reservoir simulation
+      - reservoir model
+      - 油藏数值模拟
+      - 油藏模型
+    constraints: {}
+    relationships: {}
+
+  - concept_id: rock
+    name: Rock
+    parent: reservoir_simulation
+    description: Rock properties used by the reservoir simulation model.
+    value_type: object
+    dimension: null
+    canonical_unit: null
+    aliases:
+      - rock
+      - rock properties
+      - 岩石
+      - 岩石属性
+    constraints: {}
+    relationships: {}
+
+  - concept_id: rock.compressibility
+    name: Rock Compressibility
+    parent: rock
+    description: Rock pore-volume compressibility at a declared reference pressure.
+    value_type: float
+    dimension: inverse_pressure
+    canonical_unit: 1/bar
+    aliases:
+      - rock compressibility
+      - pore compressibility
+      - CR
+      - 岩石压缩系数
+      - 孔隙压缩系数
+    constraints:
+      exclusive_minimum: 0
+    relationships:
+      referenced_at:
+        - rock.reference_pressure
+
+  - concept_id: rock.reference_pressure
+    name: Rock Reference Pressure
+    parent: rock
+    description: Pressure at which the rock compressibility is referenced.
+    value_type: float
+    dimension: pressure
+    canonical_unit: bar
+    aliases:
+      - rock reference pressure
+      - reference pressure
+      - PREF
+      - 岩石参考压力
+      - 参考压力
+    constraints:
+      exclusive_minimum: 0
+    relationships:
+      reference_for:
+        - rock.compressibility

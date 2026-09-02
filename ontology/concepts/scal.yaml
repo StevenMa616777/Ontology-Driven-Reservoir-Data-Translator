@@ -1,0 +1,112 @@
+concepts:
+  - concept_id: scal
+    name: Special Core Analysis
+    parent: reservoir_simulation
+    description: Special core analysis properties used by the simulation model.
+    value_type: object
+    dimension: null
+    canonical_unit: null
+    aliases:
+      - SCAL
+      - special core analysis
+      - relative permeability data
+      - 专项岩心分析
+      - 相渗数据
+    constraints: {}
+    relationships: {}
+
+  - concept_id: scal.relative_permeability
+    name: Oil-Water Relative Permeability
+    parent: scal
+    description: Oil-water relative permeability and capillary pressure table.
+    value_type: table
+    dimension: null
+    canonical_unit: null
+    aliases:
+      - relative permeability
+      - relperm
+      - oil water relative permeability
+      - 油水相对渗透率
+      - 油水相渗
+    constraints:
+      minimum_points: 2
+    relationships: {}
+
+  - concept_id: scal.relative_permeability.water_saturation
+    name: Water Saturation
+    parent: scal.relative_permeability
+    description: Fraction of pore volume occupied by water at a SCAL table point.
+    value_type: float
+    dimension: dimensionless
+    canonical_unit: fraction
+    aliases:
+      - Sw
+      - water saturation
+      - water sat
+      - 含水饱和度
+      - 水饱和度
+    constraints:
+      minimum: 0
+      maximum: 1
+    relationships:
+      coordinate_for:
+        - scal.relative_permeability
+
+  - concept_id: scal.relative_permeability.krw
+    name: Water Relative Permeability
+    parent: scal.relative_permeability
+    description: Relative permeability of water as a function of water saturation.
+    value_type: float
+    dimension: dimensionless
+    canonical_unit: fraction
+    aliases:
+      - Krw
+      - water relative permeability
+      - water relperm
+      - 水相相对渗透率
+      - 水相相渗
+    constraints:
+      minimum: 0
+      maximum: 1
+    relationships:
+      dependent_on:
+        - scal.relative_permeability.water_saturation
+
+  - concept_id: scal.relative_permeability.kro
+    name: Oil Relative Permeability to Water
+    parent: scal.relative_permeability
+    description: Relative permeability of oil in an oil-water system.
+    value_type: float
+    dimension: dimensionless
+    canonical_unit: fraction
+    aliases:
+      - Kro
+      - Krow
+      - oil relative permeability
+      - oil relperm to water
+      - 油相相对渗透率
+      - 油相相渗
+    constraints:
+      minimum: 0
+      maximum: 1
+    relationships:
+      dependent_on:
+        - scal.relative_permeability.water_saturation
+
+  - concept_id: scal.relative_permeability.pcow
+    name: Oil-Water Capillary Pressure
+    parent: scal.relative_permeability
+    description: Oil-water capillary pressure at a water saturation point.
+    value_type: float
+    dimension: pressure
+    canonical_unit: bar
+    aliases:
+      - Pcow
+      - oil water capillary pressure
+      - capillary pressure oil water
+      - 油水毛管压力
+      - 毛管压力
+    constraints: {}
+    relationships:
+      dependent_on:
+        - scal.relative_permeability.water_saturation

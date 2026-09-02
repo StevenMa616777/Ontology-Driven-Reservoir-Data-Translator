@@ -1,0 +1,97 @@
+concepts:
+  - concept_id: condition
+    name: Physical Condition
+    parent: reservoir_simulation
+    description: A machine-readable physical condition under which a property is defined.
+    value_type: object
+    dimension: null
+    canonical_unit: null
+    aliases:
+      - physical condition
+      - property condition
+      - 物理条件
+      - 属性条件
+    constraints: {}
+    relationships: {}
+  - concept_id: condition.reference
+    name: Reference Condition
+    parent: condition
+    description: Pressure and temperature condition used to reference a physical property.
+    value_type: object
+    dimension: null
+    canonical_unit: null
+    aliases:
+      - reference condition
+      - reference state
+      - 参考条件
+      - 参考状态
+    constraints: {}
+    relationships:
+      has_property:
+        - condition.reference.pressure
+        - condition.reference.temperature
+      reference_for:
+        - fluid.oil.density
+        - fluid.water.density
+        - fluid.gas.density
+
+  - concept_id: condition.reference.pressure
+    name: Reference Pressure
+    parent: condition.reference
+    description: Pressure component of a physical reference condition.
+    value_type: float
+    dimension: pressure
+    canonical_unit: bar
+    aliases:
+      - reference pressure condition
+      - condition pressure
+      - 参考条件压力
+      - 条件压力
+    constraints:
+      exclusive_minimum: 0
+    relationships: {}
+
+  - concept_id: condition.reference.temperature
+    name: Reference Temperature
+    parent: condition.reference
+    description: Temperature component of a physical reference condition.
+    value_type: float
+    dimension: temperature
+    canonical_unit: degC
+    aliases:
+      - reference temperature
+      - condition temperature
+      - 参考温度
+      - 条件温度
+    constraints: {}
+    relationships: {}
+
+  - concept_id: condition.reference.standard
+    name: Standard Condition
+    parent: condition.reference
+    description: A declared standard reference condition whose exact values belong to case data.
+    value_type: object
+    dimension: null
+    canonical_unit: null
+    aliases:
+      - standard condition
+      - standard state
+      - 标准条件
+      - 标准状态
+    constraints: {}
+    relationships: {}
+
+  - concept_id: condition.reference.reservoir
+    name: Reservoir Condition
+    parent: condition.reference
+    description: A reservoir pressure and temperature condition supplied by case data.
+    value_type: object
+    dimension: null
+    canonical_unit: null
+    aliases:
+      - reservoir condition
+      - reservoir state condition
+      - 油藏条件
+      - 地层条件
+    constraints: {}
+    relationships: {}

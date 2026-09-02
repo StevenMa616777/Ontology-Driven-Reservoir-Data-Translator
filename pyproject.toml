@@ -27,9 +27,15 @@ dev = [
     "pytest-asyncio>=0.25,<2",
     "pytest-cov>=6,<8",
 ]
+opm = [
+    "opm==2025.10",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"reservoir_data_translator.ui" = ["*.html", "*.css", "*.js"]
 
 [tool.pytest.ini_options]
 addopts = "-q"

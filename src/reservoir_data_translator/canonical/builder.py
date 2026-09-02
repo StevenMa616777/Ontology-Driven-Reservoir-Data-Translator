@@ -244,13 +244,6 @@ class CanonicalBuilder:
                     "Relative-permeability mapping must contain table metadata",
                     path=mapping.canonical_path,
                 )
-            table_id = selectors["relative_permeability"]
-            if mapping.value.get("id", table_id) != table_id:
-                raise CanonicalBuildError(
-                    "ENTITY_SELECTOR_MISMATCH",
-                    "Relative-permeability id does not match its path selector",
-                    path=mapping.canonical_path,
-                )
         if concept.concept_id.endswith(".pvt") and not isinstance(
             mapping.value,
             Mapping,

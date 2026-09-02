@@ -74,6 +74,8 @@ class PVTPoint(CanonicalModel):
     pressure: PhysicalValue
     formation_volume_factor: PhysicalValue | None = None
     viscosity: PhysicalValue | None = None
+    compressibility: PhysicalValue | None = None
+    viscosibility: PhysicalValue | None = None
 
 
 class PVTModel(CanonicalModel):

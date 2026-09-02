@@ -125,6 +125,8 @@ concepts:
       - 注水量
       - 日注水量
       - 注水排量
+      - 注入量
+      - 定注入量
     constraints:
       minimum: 0
     relationships:

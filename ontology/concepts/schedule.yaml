@@ -28,6 +28,7 @@ concepts:
       - total simulation time
       - 模拟周期
       - 模拟时长
+      - 模拟总时长
     constraints:
       exclusive_minimum: 0
     relationships:
@@ -47,6 +48,8 @@ concepts:
       - reporting frequency
       - 报告间隔
       - 输出间隔
+      - 按季度出报
+      - 季度出报
     constraints:
       exclusive_minimum: 0
     relationships:

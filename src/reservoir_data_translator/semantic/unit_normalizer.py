@@ -1,9 +1,9 @@
 """Deterministic physical-unit conversion backed by Pint.
 
 Only the explicitly supported v0.1 vocabulary is accepted. In particular,
-``month`` and ``year`` use the simulator policy defined by the design fixtures:
-30 days and 365 days respectively. This avoids silently depending on calendar
-context or Pint's average-year definitions.
+``month``, ``quarter``, and ``year`` use the simulator policy defined by the
+design fixtures: 30 days, 365/4 days, and 365 days respectively. This avoids
+silently depending on calendar context or Pint's average-year definitions.
 """
 
 from __future__ import annotations
@@ -98,6 +98,8 @@ class UnitNormalizer:
             "d": "day",
             "month": "simulator_month",
             "months": "simulator_month",
+            "quarter": "simulator_quarter",
+            "quarters": "simulator_quarter",
             "year": "simulator_year",
             "years": "simulator_year",
             # Compressibility
@@ -114,6 +116,7 @@ class UnitNormalizer:
     def __init__(self) -> None:
         registry = UnitRegistry(autoconvert_offset_to_baseunit=True)
         registry.define("simulator_month = 30 * day")
+        registry.define("simulator_quarter = 91.25 * day")
         registry.define("simulator_year = 365 * day")
         self._registry = registry
 

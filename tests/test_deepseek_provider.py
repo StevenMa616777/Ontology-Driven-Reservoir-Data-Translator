@@ -118,6 +118,52 @@ async def test_deepseek_provider_retries_transient_status() -> None:
 
 
 @pytest.mark.asyncio
+async def test_deepseek_provider_retries_invalid_structured_json() -> None:
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        payload = _success_response()
+        if calls == 1:
+            output = payload["output"]
+            assert isinstance(output, list)
+            output[0]["content"][0]["text"] = "{invalid"
+        return httpx.Response(200, json=payload)
+
+    provider = DeepSeekProvider(
+        "test-api-key",
+        max_output_retries=1,
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await provider.structured_generate("return JSON", SemanticModelResponse)
+
+    assert result.mappings[0].status == "MAPPED"
+    assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_deepseek_provider_accepts_one_json_markdown_fence() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = _success_response()
+        output = payload["output"]
+        assert isinstance(output, list)
+        text = output[0]["content"][0]["text"]
+        output[0]["content"][0]["text"] = f"```json\n{text}\n```"
+        return httpx.Response(200, json=payload)
+
+    provider = DeepSeekProvider(
+        "test-api-key",
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await provider.structured_generate("return JSON", SemanticModelResponse)
+
+    assert result.mappings[0].status == "MAPPED"
+
+
+@pytest.mark.asyncio
 async def test_deepseek_provider_errors_do_not_echo_remote_response_body() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(

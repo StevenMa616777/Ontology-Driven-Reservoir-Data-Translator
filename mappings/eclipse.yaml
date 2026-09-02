@@ -14,6 +14,8 @@ mappings:
     target_type: DENSITY
   fluid.oil.pvt:
     target_type: PVDO
+  fluid.water.pvt:
+    target_type: PVTW
   fluid.gas.pvt:
     target_type: PVDG
   scal.relative_permeability:

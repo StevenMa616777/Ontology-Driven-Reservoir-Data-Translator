@@ -52,12 +52,15 @@ def test_eclipse_mapper_separates_mapping_from_rendering(
         "ROCK",
         "DENSITY",
         "PVDO",
+        "PVTW",
         "SWOF",
         "WCONPROD",
         "WCONINJE",
         "TSTEP",
     ]
     assert "SWOF\n" in content
+    assert "PVTW\n" in content
+    assert "300 1.02 4.2e-05 0.45 1* /" in content
     assert "WCONPROD\n" in content
     assert "'A15' 'OPEN' 'LRAT'" in content
     assert "WCONINJE\n" in content
@@ -66,6 +69,20 @@ def test_eclipse_mapper_separates_mapping_from_rendering(
         "rock.reference_pressure",
         "rock.compressibility",
     ]
+
+
+def test_eclipse_mapper_accepts_single_constant_water_pvt(
+    canonical_demo: ReservoirSimulationModel,
+    platform_mappers,
+) -> None:
+    eclipse, _ = platform_mappers
+    assert canonical_demo.fluids.water is not None
+    assert canonical_demo.fluids.water.pvt is not None
+    canonical_demo.fluids.water.pvt.model_type = "constant"
+
+    exported = eclipse.export(canonical_demo)
+
+    assert "PVTW" in exported.content
 
 
 def test_cmg_and_eclipse_consume_same_canonical_without_mutation(

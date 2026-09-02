@@ -1,6 +1,30 @@
 # DESIGN.md implementation completeness
 
-Status date: 2026-09-01
+Status date: 2026-09-02
+
+This file is the task-by-task and layer-by-layer implementation matrix. For the
+project narrative and runtime flow, see [`docs/PROJECT_OVERVIEW.md`](docs/PROJECT_OVERVIEW.md).
+For the frozen acceptance scope and closure decision, see
+[`docs/POC_CLOSURE.md`](docs/POC_CLOSURE.md).
+
+## PoC closure evidence
+
+The bundled Demo now passes one reproducible real-provider acceptance chain:
+
+- `deepseek-v4-flash` mapped all three source blocks into 71 accepted semantic
+  mappings with no unresolved or review-required outcomes.
+- Canonical construction and L1-L4 validation passed.
+- Deterministic Eclipse output contains `SWOF`, `PVDO`, `PVDG`, `PVTW`,
+  `DENSITY`, `ROCK`, `WCONPROD`, `WCONINJE`, and `TSTEP`.
+- OPM Python Parser 2025.10 parsed both the bundled output Golden File and the
+  generated INCLUDE in a minimal host-deck context; their normalized keyword
+  semantics are equal.
+- The full automated suite passes 129 tests, and a rebuilt
+  wheel passes installed import, CLI, quarter-unit, and OPM comparison checks.
+
+The `.inc` comparison is output-Golden validation. It does not substitute for
+the concept/path annotation Gold dataset that is still being collected, so no
+semantic extraction precision, recall, or F1 is claimed.
 
 ## Task acceptance
 
@@ -27,24 +51,23 @@ Status date: 2026-09-01
 | Source Mapping | Complete for the three Task 9 clients | No governance UI, mapping approval workflow or large customer catalog |
 | Ingestion | Complete for TXT, JSON, CSV and XLSX | No PDF/DOCX/OCR, streaming large workbooks or password-protected files |
 | Ontology Retrieval | Complete for deterministic lexical/source mappings | No embedding index, retrieval evaluation corpus or context-budget strategy |
-| Semantic Agent | DeepSeek provider complete for PoC | OpenAI/local providers and representative live-model evaluation corpus remain unimplemented |
-| Human Review | Safety stop and confidence thresholds implemented | No persistent review queue, approve/reject/edit workflow or reviewer audit history |
+| Semantic Agent | DeepSeek V4 Flash provider and complete bundled-Demo run pass | OpenAI/local providers and a representative annotated semantic Gold corpus remain unimplemented |
+| Human Review | Safety stop, confidence thresholds and explicit session-only low-confidence approval implemented | No persistent review queue, mapping edit workflow or reviewer audit history |
 | Entity Resolution | Partial | Builder groups exact selectors only; normalized aliases and uncertain merge review are not implemented |
 | Unit Normalization | Complete for v0.1 vocabulary | No broader unit catalog or source-unit ontology governance |
 | Canonical Model/Builder | Complete for v0.1 schema | Not full PVT/SCAL/schedule coverage; time-varying well roles are not modeled |
 | Validation L1-L3 | Complete for v0.1 rules | No simulator-independent full engineering rule library or external reference-condition reconciliation |
-| Eclipse Mapper/L4 | Demo complete | INCLUDE needs host-deck context and parser/simulator compatibility validation for a frozen target version |
+| Eclipse Mapper/L4 | Demo output passes OPM Python Parser 2025.10 and its output Golden | A real host deck plus actual Flow/commercial simulator execution is still required |
 | CMG Mapper/L4 | Demo control fragment complete | CMG product/version grammar is not frozen; non-well domains are intentionally not rendered |
 | API | Complete for six Task 12 endpoints | No authentication, authorization, rate limits, job queue, object storage or API version migration policy |
 | Trace/Replay | In-response translation ID and stage trace implemented | No durable append-only event store, replay endpoint or operational observability backend |
-| Evaluation | Cross-source equivalence, regression tests and one DeepSeek synthetic smoke implemented | No production metrics store, drift dashboard or representative live-provider benchmark suite |
-| UI | Not implemented | Phase 5 upload/mapping/review/canonical/validate/export interface remains |
+| Evaluation | Cross-source equivalence, 129-test regression suite, synthetic smoke, and full real DeepSeek Demo/OPM/Golden chain pass | No semantic Gold accuracy metrics, production metrics store, drift dashboard, or representative benchmark suite |
+| UI | Complete for the local PoC workbench: upload/paste, mapping, review, Canonical, validation, export and trace | No authentication, durable review/replay, artifact-bundle storage or production deployment |
 
 ## Production-readiness conclusion
 
 Tasks 1-12 and the v0.1 automated Definition of Done are implemented at PoC level.
 The system is not yet a production translator or a verified commercial-simulator
-deck generator. The next release should first freeze one real ECLIPSE/OPM target
-and one CMG product/version, expand the DeepSeek smoke into trace-based semantic
-evaluation, implement durable human review and replay, then validate generated
-artifacts against real parsers/simulators.
+deck generator. The next release should add the collected semantic Gold labels,
+exercise this INCLUDE inside a real host deck with Flow, freeze and validate one
+CMG product/version, then implement durable human review and replay.

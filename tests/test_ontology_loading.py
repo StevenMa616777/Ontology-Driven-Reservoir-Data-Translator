@@ -12,7 +12,7 @@ def test_loads_manifest_and_all_domain_files(registry: OntologyRegistry) -> None
     assert registry.metadata.version == "0.1.0"
     assert registry.metadata.convention_version == "0.1.0"
     assert registry.metadata.namespace == "reservoir_simulation"
-    assert len(registry) == 49
+    assert len(registry) == 51
 
     source_files = {concept.source_file for concept in registry.list_concepts()}
     assert source_files == {

@@ -184,6 +184,18 @@ def get_canonical_mapping_contract(
             rf"fluids\.{phase}\.pvt\.points\[{_INDEX}\]\.{field}",
         )
 
+    water_property_match = re.fullmatch(
+        r"fluid\.water\.pvt\.(compressibility|viscosibility)",
+        concept_id,
+    )
+    if water_property_match:
+        field = water_property_match.group(1)
+        return _contract(
+            concept_id,
+            f"fluids.water.pvt.points[{{point_index}}].{field}",
+            rf"fluids\.water\.pvt\.points\[{_INDEX}\]\.{field}",
+        )
+
     field = _SCAL_FIELDS.get(concept_id)
     if field is not None:
         return _contract(

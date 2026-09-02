@@ -44,6 +44,7 @@ concepts:
       - rho oil
       - 油密度
       - 原油密度
+      - 密度:油
     constraints:
       exclusive_minimum: 0
     relationships:
@@ -154,6 +155,7 @@ concepts:
       - rho water
       - 水密度
       - 地层水密度
+      - 密度:水
     constraints:
       exclusive_minimum: 0
     relationships:
@@ -234,6 +236,40 @@ concepts:
       dependent_on:
         - fluid.water.pvt.pressure
 
+  - concept_id: fluid.water.pvt.compressibility
+    name: Water Compressibility
+    parent: fluid.water.pvt
+    description: Water compressibility at the declared reference pressure.
+    value_type: float
+    dimension: inverse_pressure
+    canonical_unit: 1/bar
+    aliases:
+      - water compressibility
+      - Cw
+      - 地层水压缩系数
+      - 水压缩系数
+    constraints:
+      minimum: 0
+    relationships:
+      dependent_on:
+        - fluid.water.pvt.pressure
+
+  - concept_id: fluid.water.pvt.viscosibility
+    name: Water Viscosibility
+    parent: fluid.water.pvt
+    description: Pressure derivative of water viscosity at the reference pressure.
+    value_type: float
+    dimension: inverse_pressure
+    canonical_unit: 1/bar
+    aliases:
+      - water viscosibility
+      - Cv
+      - 地层水粘度压力系数
+    constraints: {}
+    relationships:
+      dependent_on:
+        - fluid.water.pvt.pressure
+
   - concept_id: fluid.gas
     name: Gas Phase
     parent: fluid
@@ -263,6 +299,7 @@ concepts:
       - rho gas
       - 气体密度
       - 气相密度
+      - 密度:气
     constraints:
       exclusive_minimum: 0
     relationships:

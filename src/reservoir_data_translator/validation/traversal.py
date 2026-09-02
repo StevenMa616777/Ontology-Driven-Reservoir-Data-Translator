@@ -77,6 +77,18 @@ def iter_physical_values(
                     f"{prefix}.viscosity",
                     point.viscosity,
                 )
+            if phase_name == "water" and point.compressibility is not None:
+                yield PhysicalObservation(
+                    f"fluid.{phase_name}.pvt.compressibility",
+                    f"{prefix}.compressibility",
+                    point.compressibility,
+                )
+            if phase_name == "water" and point.viscosibility is not None:
+                yield PhysicalObservation(
+                    f"fluid.{phase_name}.pvt.viscosibility",
+                    f"{prefix}.viscosibility",
+                    point.viscosibility,
+                )
 
     scal_concepts = {
         "sw": "scal.relative_permeability.water_saturation",

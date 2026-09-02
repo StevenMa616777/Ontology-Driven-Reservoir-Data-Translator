@@ -101,17 +101,48 @@ class EclipseDemoMapper(PlatformMapper):
                         )
                     )
 
-        if canonical_model.fluids.water is not None and (
-            canonical_model.fluids.water.pvt is not None
-        ):
-            warnings.append(
-                self._issue(
-                    "ECLIPSE_WATER_PVT_NOT_EXPORTED",
-                    "fluids.water.pvt",
-                    "Canonical v0.1 lacks the full PVTW context; water PVT is omitted.",
-                    warning=True,
+        water = canonical_model.fluids.water
+        if water is not None and water.pvt is not None:
+            if len(water.pvt.points) != 1:
+                errors.append(
+                    self._issue(
+                        "ECLIPSE_PVTW_POINT_COUNT_UNSUPPORTED",
+                        "fluids.water.pvt.points",
+                        (
+                            "The demo PVTW exporter requires exactly one reference "
+                            "record for either a constant or table canonical model."
+                        ),
+                    )
                 )
-            )
+            for point_index, point in enumerate(water.pvt.points):
+                required = (
+                    point.formation_volume_factor,
+                    point.compressibility,
+                    point.viscosity,
+                )
+                if any(value is None for value in required):
+                    errors.append(
+                        self._issue(
+                            "ECLIPSE_PVTW_POINT_INCOMPLETE",
+                            f"fluids.water.pvt.points[{point_index}]",
+                            (
+                                "PVTW requires reference pressure, water volume "
+                                "factor, compressibility, and viscosity."
+                            ),
+                        )
+                    )
+                if point.viscosibility is None:
+                    warnings.append(
+                        self._issue(
+                            "ECLIPSE_PVTW_VISCOSIBILITY_DEFAULTED",
+                            f"fluids.water.pvt.points[{point_index}].viscosibility",
+                            (
+                                "Water viscosibility is absent; PVTW uses the "
+                                "simulator keyword default instead of inventing data."
+                            ),
+                            warning=True,
+                        )
+                    )
 
         rock = canonical_model.rock
         if (rock.compressibility is None) != (rock.reference_pressure is None):
@@ -234,6 +265,32 @@ class EclipseDemoMapper(PlatformMapper):
                         records=records,
                     )
                 )
+
+        water = canonical_model.fluids.water
+        if water is not None and water.pvt is not None:
+            blocks.append(
+                PlatformBlock(
+                    keyword=self._mappings.target_for("fluid.water.pvt"),
+                    section="PROPS",
+                    records=[
+                        _record(
+                            [
+                                _token(point.pressure.value),
+                                _token(point.formation_volume_factor.value),
+                                _token(point.compressibility.value),
+                                _token(point.viscosity.value),
+                                _token(
+                                    point.viscosibility.value
+                                    if point.viscosibility is not None
+                                    else None
+                                ),
+                            ],
+                            f"fluids.water.pvt.points[{index}]",
+                        )
+                        for index, point in enumerate(water.pvt.points)
+                    ],
+                )
+            )
 
         for table_index, table in enumerate(canonical_model.scal.relative_permeability):
             blocks.append(
@@ -424,6 +481,7 @@ class EclipseDemoMapper(PlatformMapper):
                 complete_rock,
                 all(value is not None for value in densities),
                 model.fluids.oil is not None and model.fluids.oil.pvt is not None,
+                model.fluids.water is not None and model.fluids.water.pvt is not None,
                 model.fluids.gas is not None and model.fluids.gas.pvt is not None,
                 bool(model.scal.relative_permeability),
                 bool(model.wells),

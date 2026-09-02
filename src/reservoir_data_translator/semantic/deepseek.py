@@ -51,9 +51,10 @@ class DeepSeekProvider(SemanticModelProvider):
         model: str = DEFAULT_DEEPSEEK_MODEL,
         base_url: str = DEFAULT_DEEPSEEK_BASE_URL,
         timeout_seconds: float = 120.0,
-        max_output_tokens: int = 16_384,
+        max_output_tokens: int = 32_768,
         reasoning_effort: str = "none",
         max_retries: int = 1,
+        max_output_retries: int = 1,
         transport: httpx.AsyncBaseTransport | None = None,
         trace_sink: Callable[[DeepSeekCallTrace], None] | None = None,
     ) -> None:
@@ -70,6 +71,8 @@ class DeepSeekProvider(SemanticModelProvider):
             raise ValueError("reasoning_effort is not supported by the Responses API")
         if max_retries < 0:
             raise ValueError("max_retries must be non-negative")
+        if max_output_retries < 0:
+            raise ValueError("max_output_retries must be non-negative")
 
         self._api_key = key
         self.model = model.strip()
@@ -78,6 +81,7 @@ class DeepSeekProvider(SemanticModelProvider):
         self.max_output_tokens = max_output_tokens
         self.reasoning_effort = reasoning_effort
         self.max_retries = max_retries
+        self.max_output_retries = max_output_retries
         self._transport = transport
         self._trace_sink = trace_sink
 
@@ -167,13 +171,29 @@ class DeepSeekProvider(SemanticModelProvider):
             "User-Agent": "reservoir-data-translator/0.1",
         }
         timeout = httpx.Timeout(self.timeout_seconds)
-        async with httpx.AsyncClient(
-            timeout=timeout,
-            transport=self._transport,
-        ) as client:
-            response = await self._post_with_retry(client, headers, request_body)
+        async with httpx.AsyncClient(timeout=timeout, transport=self._transport) as client:
+            for attempt in range(self.max_output_retries + 1):
+                response = await self._post_with_retry(client, headers, request_body)
+                payload = _response_json(response)
+                self._emit_trace(payload)
+                try:
+                    return self._validated_output(payload, response_model)
+                except SemanticProviderError as exc:
+                    retryable = exc.code in {
+                        "DEEPSEEK_INVALID_JSON",
+                        "DEEPSEEK_MISSING_OUTPUT",
+                        "DEEPSEEK_SCHEMA_MISMATCH",
+                    }
+                    if not retryable or attempt >= self.max_output_retries:
+                        raise
+                    await asyncio.sleep(0.25 * (attempt + 1))
+        raise AssertionError("DeepSeek output retry loop exhausted")
 
-        payload = _response_json(response)
+    @staticmethod
+    def _validated_output(
+        payload: Mapping[str, Any],
+        response_model: type[ResponseModel],
+    ) -> ResponseModel:
         status = payload.get("status")
         if status != "completed":
             raise SemanticProviderError(
@@ -182,7 +202,7 @@ class DeepSeekProvider(SemanticModelProvider):
             )
         output_text = _extract_output_text(payload)
         try:
-            structured = json.loads(output_text)
+            structured = _decode_structured_json(output_text)
         except json.JSONDecodeError as exc:
             raise SemanticProviderError(
                 "DEEPSEEK_INVALID_JSON",
@@ -196,7 +216,6 @@ class DeepSeekProvider(SemanticModelProvider):
                 "DeepSeek JSON did not satisfy the requested response model.",
             ) from exc
 
-        self._emit_trace(payload)
         return result
 
     async def _post_with_retry(
@@ -312,6 +331,22 @@ def _extract_output_text(payload: Mapping[str, Any]) -> str:
             "DeepSeek response did not contain structured output text.",
         )
     return output_text
+
+
+def _decode_structured_json(output_text: str) -> Any:
+    """Decode raw JSON or one conventional Markdown JSON code fence."""
+
+    try:
+        return json.loads(output_text)
+    except json.JSONDecodeError as original_error:
+        fenced = re.fullmatch(
+            r"```(?:json)?\s*(.*?)\s*```",
+            output_text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if fenced is None:
+            raise original_error
+        return json.loads(fenced.group(1))
 
 
 def _optional_string(value: object) -> str | None:

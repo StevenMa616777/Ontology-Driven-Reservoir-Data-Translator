@@ -58,3 +58,20 @@ def test_retriever_returns_no_zero_score_candidates(
     registry: OntologyRegistry,
 ) -> None:
     assert OntologyRetriever(registry).retrieve("XYZ_COEFF") == []
+
+
+def test_retriever_recalls_demo_injection_and_schedule_phrases(
+    registry: OntologyRegistry,
+) -> None:
+    source = (
+        "C1 注水井定注入量 800 方/天，模拟总时长 5 年，按季度出报"
+    )
+
+    concept_ids = {
+        candidate.concept_id
+        for candidate in OntologyRetriever(registry).retrieve(source, top_k=20)
+    }
+
+    assert "well.control.water_injection_rate" in concept_ids
+    assert "schedule.duration" in concept_ids
+    assert "schedule.report_interval" in concept_ids

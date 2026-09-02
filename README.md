@@ -1,252 +1,160 @@
-# Reservoir Data Translator
+# Ontology-Driven Reservoir Data Translator
 
-Ontology-driven reservoir simulation data translation PoC.
+面向油藏数值模拟资料的语义转换 PoC：把异构的 TXT、JSON、CSV、XLSX
+资料转换为统一的 Canonical Data Model，再由确定性程序生成 Eclipse/OPM
+INCLUDE 或 CMG Demo 片段。
 
-The internal architecture keeps semantic understanding separate from deterministic
-canonical-model construction and simulator export. Tasks 1-12 provide the Python
-foundation, externalized Company Ontology, platform-independent Pydantic canonical
-models, deterministic unit normalization and construction, four-level validation,
-format-neutral ingestion, deterministic ontology retrieval, a guarded semantic
-model abstraction, cross-source consistency fixtures, deterministic Eclipse/CMG
-demo mappers, and a staged FastAPI pipeline.
+> **PoC v0.1 已于 2026-09-02 完成阶段性收口。** 当前结论是“技术路线和
+> Demo 闭环成立”，不是“已经达到生产环境或商业模拟器认证标准”。详细证据和
+> 边界见 [PoC 收口报告](docs/POC_CLOSURE.md)。
 
-## Current scope (Tasks 1-12)
+## 我们想解决什么
 
-- YAML ontology manifest, machine-readable Convention, and domain concept files
-- immutable in-memory ontology concepts
-- deterministic alias lookup
-- concept relationship validation
-- structured `ERROR` / `WARNING` / `INFO` convention validation
-- controlled value type, dimension/unit, constraint, and relationship vocabularies
-- table topology, inverse relationship, source-pollution, and lifecycle checks
-- reusable `PhysicalValue` and `Provenance` models
-- canonical rock, fluid/PVT, SCAL, well/control, and schedule models
-- strict JSON input/output with unknown-field rejection
-- deterministic JSON Schema generation for the six design-level model groups
-- Pint-backed pressure, rate, viscosity, density, time, and compressibility conversion
-- explicit 30-day month and 365-day year policy for PoC schedule normalization
-- structured `SemanticMapping` results with source-block provenance
-- deterministic `CanonicalBuilder` with concept/path/unit contract enforcement
-- stable collection grouping for PVT points, SCAL tables, wells, controls, and constraints
-- L1 schema, L2 ontology-instance, L3 domain, and target-delegated L4 export validation
-- structured path-addressable `ValidationResult` errors and warnings
-- format-neutral `RawDocument` / `RawBlock` models with source locations
-- TXT paragraph, JSON structure, CSV table, and XLSX worksheet parsers
-- deterministic alias-first and keyword-fallback `OntologyRetriever`
-- provider-neutral async `SemanticModelProvider` structured-output contract
-- DeepSeek Responses API provider with Pydantic JSON Schema output and local revalidation
-- environment-first DeepSeek credentials with an ignored local key-file fallback
-- non-secret DeepSeek call traces for live smoke-test evidence
-- `MAPPED`, `UNMAPPED`, and `AMBIGUOUS` semantic outcomes
-- enforcement that provider concepts, canonical paths, and canonical units come
-  from the retrieved ontology/canonical contracts
-- parser-owned provenance retained independently of provider-proposed excerpts
-- external customer Source Mapping registries that do not pollute ontology aliases
-- three heterogeneous CSV/JSON/TXT datasets with Canonical equivalence testing
-- external Eclipse and CMG Platform Output Mapping registries
-- deterministic `PlatformMapper` mapping/rendering split and L4 export validation
-- METRIC ECLIPSE/OPM demo INCLUDE generation
-- explicitly labelled CMG IMEX-style demo well-control fragment generation
-- FastAPI endpoints for ingest, semantic mapping, Canonical build, validation,
-  export, and full translation
-- translation IDs and an in-response stage trace
-- unit tests
+油藏工程资料通常来自不同客户、文件格式和字段体系。人工转换既要理解自然语言和
+表格语义，又要处理单位、物理约束和模拟器 Keyword 语法，过程重复且难以审计。
 
-## Setup
+本项目验证一条可追溯的转换路线：
+
+- LLM 只负责非确定性的“这段资料表达了什么”；
+- Company Ontology 定义统一的业务语义；
+- Canonical Model 是平台无关的唯一内部表达；
+- 单位换算、模型构建、校验和目标文件生成全部由确定性代码负责；
+- 缺失、歧义或低置信度信息必须停在人工审查门，不允许模型猜测补全。
+
+## 系统如何工作
+
+```mermaid
+flowchart LR
+    A[TXT / JSON / CSV / XLSX] --> B[Ingestion<br/>RawDocument]
+    B --> C[Ontology Retrieval]
+    C --> D[LLM Semantic Mapping]
+    D --> E{Review Gate}
+    E -->|未映射 / 歧义 / 低置信度| F[Human Review]
+    E -->|通过| G[Canonical Builder]
+    F -->|批准可接受的低置信度项| G
+    G --> H[L1-L3 Validation]
+    H --> I[Platform Mapper]
+    I --> J[L4 Export Validation]
+    J --> K[Eclipse / CMG Artifact]
+```
+
+一次 `/translate` 请求按以下顺序运行：
+
+1. Parser 只解析文件结构，生成带来源位置的 `RawDocument/RawBlock`。
+2. Retriever 从 Ontology 和外部 Source Mapping 中提供受控候选。
+3. DeepSeek 返回结构化 `MAPPED/UNMAPPED/AMBIGUOUS` 结果；系统重新校验
+   Concept、Canonical Path、单位、结构值和实体关系。
+4. Review Gate 阻断未解决项和置信度低于 0.80 的结果。
+5. `CanonicalBuilder` 做单位归一和平台无关模型构建，不创造缺失值。
+6. L1-L3 分别验证 Schema、Ontology 实例约束和领域规则。
+7. Eclipse/CMG Mapper 生成确定性目标中间模型与文本，L4 验证目标可导出性。
+8. 响应返回 translation ID、各阶段 trace、Canonical、Validation 和目标片段。
+
+完整的组件职责、启动逻辑和异常分支见
+[项目总览与运行逻辑](docs/PROJECT_OVERVIEW.md)。
+
+## 当前 PoC 能力
+
+| 能力 | 当前状态 |
+|---|---|
+| 输入 | TXT、JSON、CSV、XLSX；保留 block 级来源位置 |
+| 语义层 | 外部 YAML Ontology、Source Mapping、受控检索、DeepSeek V4 Flash |
+| Canonical | Rock、Fluid/PVT、SCAL、Well/Control、Schedule |
+| 单位 | 压力、速率、黏度、密度、时间、压缩系数的受控换算 |
+| 安全门 | UNMAPPED、AMBIGUOUS、低置信度阻断；浏览器会话内人工批准 |
+| 校验 | L1 Schema、L2 Ontology、L3 Domain、L4 Platform Export |
+| Eclipse | `SWOF/PVDO/PVDG/PVTW/DENSITY/ROCK/WCONPROD/WCONINJE/TSTEP` |
+| CMG | 未冻结版本的 IMEX-style 井控 Demo 片段 |
+| 接口 | 六个分阶段 FastAPI endpoint 和完整 `/translate` 流水线 |
+| UI | 本地 Upload/Paste → Mapping → Review → Canonical → Export 工作台 |
+
+## 快速开始
+
+要求 Python 3.12+。
 
 ```bash
 python3 -m venv .venv
-.venv/bin/python -m pip install '.[dev]'
+.venv/bin/python -m pip install '.[dev,opm]'
 .venv/bin/ontology-validate ontology
 .venv/bin/python -m pytest
 .venv/bin/uvicorn reservoir_data_translator.api.main:app --reload
 ```
 
-## Basic usage
+浏览器打开 `http://127.0.0.1:8000/`。在没有 Provider 凭据时，确定性 endpoint
+仍可使用，语义转换 endpoint 会明确返回 `SEMANTIC_PROVIDER_NOT_CONFIGURED`。
 
-```python
-from reservoir_data_translator.ontology import OntologyRegistry
-
-registry = OntologyRegistry.load("ontology")
-matches = registry.search_by_alias("日产液")
-assert matches[0].concept_id == "well.control.liquid_rate"
-assert registry.validation.valid
-```
-
-Ingestion identifies only file-level structure; it does not decide what a field
-means:
-
-```python
-from reservoir_data_translator.ingestion import parse_document
-
-raw_document = parse_document("client_data.xlsx", source_id="client-a")
-assert raw_document.source_type == "xlsx"
-assert raw_document.blocks[0].block_type == "table"
-```
-
-Candidate retrieval is deterministic and can be inspected before any model call:
-
-```python
-from reservoir_data_translator.semantic import OntologyRetriever
-
-retriever = OntologyRetriever(registry)
-candidates = retriever.retrieve(raw_document.blocks[0], top_k=8)
-```
-
-`SemanticMappingAgent` requires an application-supplied implementation of the
-abstract `SemanticModelProvider`. The provider receives the Pydantic
-`SemanticModelResponse` type and must return structured data. The agent rejects
-free text, unsupplied concepts, invented canonical paths, and incorrect canonical
-units:
-
-```python
-from reservoir_data_translator.semantic import SemanticMappingAgent
-
-agent = SemanticMappingAgent(registry, provider, retriever=retriever)
-mapping_batch = await agent.map_document(raw_document)
-semantic_mappings = mapping_batch.mapped
-unresolved = mapping_batch.unresolved
-```
-
-The bundled hosted provider uses DeepSeek's Responses API with
-`deepseek-v4-flash` by default. Credentials are resolved from
-`DEEPSEEK_API_KEY` first, then `DEEPSEEK_API_KEY_FILE`, then the project-local
-ignored file `LLM/DeepSeek/api_key` when the default FastAPI app is created:
-
-```python
-from reservoir_data_translator.semantic import DeepSeekProvider
-
-provider = DeepSeekProvider.from_environment(
-    api_key_file="LLM/DeepSeek/api_key",
-)
-```
-
-Optional runtime configuration:
-
-```text
-RESERVOIR_SEMANTIC_PROVIDER=deepseek  # use "disabled" for deterministic-only mode
-DEEPSEEK_MODEL=deepseek-v4-flash
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_TIMEOUT_SECONDS=120
-```
-
-Run the real synthetic semantic smoke test without printing the credential:
+DeepSeek 凭据建议通过环境变量提供：
 
 ```bash
-.venv/bin/python scripts/smoke_deepseek.py \
-  --output artifacts/deepseek_semantic_smoke.json
+export DEEPSEEK_API_KEY='your-key'
+export DEEPSEEK_MODEL='deepseek-v4-flash'
+.venv/bin/uvicorn reservoir_data_translator.api.main:app --reload
 ```
 
-Customer-only terms such as `LRAT`, `PROD`, and `pressure_floor` live in
-`mappings/customer_*.yaml`. Pass the selected `source_system` through the API or
-construct `OntologyRetriever` with the corresponding `SourceMappingRegistry`.
+项目也兼容 `DEEPSEEK_API_KEY_FILE`；凭据文件、运行 artifact、Prompt 和模型原始
+响应都不应提交到 Git。更完整的启动、验证和故障排查命令见
+[运行手册](docs/RUNBOOK.md)。
 
-Canonical models use standard Pydantic v2 serialization and validation APIs:
+## PoC 验收命令
 
-```python
-from reservoir_data_translator.canonical import (
-    PhysicalValue,
-    ReservoirSimulationModel,
-    generate_json_schemas,
-    write_json_schemas,
-)
+不调用外部模型的本地门禁：
 
-pressure = PhysicalValue(value=200, unit="bar")
-schema = ReservoirSimulationModel.model_json_schema()
-schemas = generate_json_schemas()
-write_json_schemas("canonical/schemas")
+```bash
+.venv/bin/python -m pytest
+.venv/bin/ontology-validate ontology --json
+.venv/bin/python -m pip check
 ```
 
-Unit conversion is deterministic and accepts only the v0.1 vocabulary:
+在明确配置 DeepSeek 凭据后，完整 Demo 验收链为：
 
-```python
-from reservoir_data_translator.semantic import UnitNormalizer
-
-normalizer = UnitNormalizer()
-assert normalizer.normalize(5, "year", "day") == 1825
-assert normalizer.normalize(1, "g/cm3", "kg/m3") == 1000
+```bash
+.venv/bin/python scripts/evaluate_demo_deepseek.py
 ```
 
-`CanonicalBuilder` accepts manually or agent-produced `MAPPED` outcomes.
-It checks the ontology concept, canonical path, and ontology-owned canonical unit
-before constructing the Pydantic model. It never invents a missing value.
+该脚本执行：Demo 原文 → DeepSeek → Semantic Mapping → Canonical → L1-L4 →
+Eclipse INCLUDE → OPM 2025.10 Parser → Golden 语义比较，并把不含密钥/Prompt 的
+本地证据写入 `artifacts/demo_deepseek_evaluation/`。
 
-```python
-from reservoir_data_translator.canonical import CanonicalBuilder
-
-builder = CanonicalBuilder(registry)
-canonical = builder.build(semantic_mappings)
-```
-
-Canonical and target export readiness are deliberately separate:
-
-```python
-from reservoir_data_translator.validation import ValidationEngine
-
-result = ValidationEngine(registry).validate(canonical)
-assert result.valid
-```
-
-The two demo mappers consume the same Canonical model and never call an LLM:
-
-```python
-from reservoir_data_translator.mappers import (
-    EclipseDemoMapper,
-    PlatformMappingRegistry,
-)
-
-mapping = PlatformMappingRegistry.load("mappings/eclipse.yaml", registry)
-eclipse = EclipseDemoMapper(mapping)
-export = eclipse.export(canonical)
-```
-
-L4 export checks remain target-specific. The Eclipse artifact is an INCLUDE that
-requires a compatible host deck. The CMG artifact is deliberately labelled as an
-unverified-version IMEX-style demo control fragment; it is not represented as a
-standalone production dataset.
-
-## API
-
-The six required endpoints are:
+## 仓库结构
 
 ```text
-POST /ingest
-POST /semantic-map
-POST /canonical/build
-POST /validate
-POST /export/{platform}
-POST /translate
+.
+├── src/reservoir_data_translator/
+│   ├── ingestion/      # 文件结构解析
+│   ├── ontology/       # Ontology 加载、Registry、定义校验
+│   ├── semantic/       # 检索、Source Mapping、Provider、语义安全门
+│   ├── canonical/      # 平台无关模型与确定性 Builder
+│   ├── validation/     # L1-L4 与 OPM Parser 对比
+│   ├── mappers/        # Eclipse / CMG 确定性 Mapper
+│   ├── api/            # FastAPI 分阶段接口与完整流水线
+│   └── ui/             # 本地浏览器工作台
+├── ontology/           # 平台/客户无关的 v0.1 Ontology
+├── mappings/           # 客户 Source Mapping 与平台 Output Mapping
+├── example/            # Demo 原文与 Eclipse 输出 Golden
+├── scripts/            # 真实 Provider smoke / 完整验收脚本
+├── tests/              # 自动化回归测试
+└── docs/               # 项目说明、收口报告与运行手册
 ```
 
-Text sources are sent as UTF-8 JSON strings. Binary XLSX content uses base64:
+## 文档导航
 
-```json
-{
-  "file_name": "client.xlsx",
-  "content_encoding": "base64",
-  "content": "..."
-}
-```
+- [项目总览与运行逻辑](docs/PROJECT_OVERVIEW.md)：我们想做什么、怎么做、系统现在如何运行。
+- [PoC 收口报告](docs/POC_CLOSURE.md)：冻结范围、当前证据、完成结论和遗留边界。
+- [运行手册](docs/RUNBOOK.md)：安装、启动、API、测试、真实模型验收和安全约束。
+- [开发设计文档](DESIGN.md)：v0.1/v0.2 的详细设计合同与 Tasks 1-12。
+- [设计完成度审计](DESIGN_COMPLETENESS.md)：逐 Task、逐层完成度矩阵。
+- [Ontology 约定](ONTOLOGY_CONVENTIONS.md)：概念、别名、关系、单位和版本规则。
+- [原始 PoC 企划](docs/archive/ORIGINAL_POC_BRIEF_ZH.md)：最初的业务目标与成功标准，作为历史基线保留。
 
-The default application loads `ontology/` and `mappings/` from the project or
-from `RESERVOIR_ONTOLOGY_PATH` / `RESERVOIR_MAPPING_PATH`. It configures DeepSeek
-when a supported credential source is present. Otherwise semantic endpoints
-return `503 SEMANTIC_PROVIDER_NOT_CONFIGURED`; deterministic endpoints remain
-usable.
+## 明确边界
 
-## Deliberate PoC boundaries
+- Eclipse 输出通过固定版本 OPM Python Parser 和输出 Golden 比较，但尚未在真实
+  host deck 中运行 Flow，也未经过商业 ECLIPSE 认证。
+- 当前没有带人工 Concept/Path 标签的代表性 Semantic Gold 数据集，因此不宣称
+  extraction precision、recall 或 F1。
+- Review 批准和 trace 仅在本次请求/浏览器会话内存在，没有持久化审批、回放或审计库。
+- 没有认证授权、任务队列、对象存储、多租户、生产监控和部署加固。
+- CMG 只证明同一 Canonical 可驱动第二个平台 Mapper，不代表 CMG 语法已验证。
 
-- Only DeepSeek is bundled; OpenAI and local providers are still application extensions.
-- Live-provider evaluation currently has one synthetic smoke case, not a representative
-  extraction accuracy, drift, latency, or cost benchmark suite.
-- No persistent human-review queue or durable translation replay store exists.
-- Entity resolution remains exact selector grouping; normalized/agent-assisted
-  entity merging is not implemented.
-- Eclipse output still requires host-deck context and an OPM/commercial parser
-  compatibility smoke test for the chosen deployment version.
-- CMG product/version grammar has not been frozen or validated with CMG software.
-- The Phase 5 upload/review UI is not implemented.
-
-The human-readable modeling rules are in
-[`ONTOLOGY_CONVENTIONS.md`](ONTOLOGY_CONVENTIONS.md). Source/platform terminology is
-kept outside the canonical ontology under [`mappings/`](mappings/README.md).
+这些限制不会否定 PoC 结论，但它们决定了下一阶段应优先补“业务证据和真实消费”，
+而不是继续无边界扩展架构。

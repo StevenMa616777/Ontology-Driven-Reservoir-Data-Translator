@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Mapping
 
 from pydantic import BaseModel, ValidationError
@@ -67,6 +68,12 @@ Rules:
 8. If two or more supplied concepts remain plausible, return AMBIGUOUS.
 9. If no supplied concept is valid, return UNMAPPED.
 10. Return data conforming to the provided structured response model only.
+11. A table-level mapping must use the object described by value_contract;
+    never return null for a required structural value.
+12. The selected ontology_concept and canonical_path must come from the same
+    candidate entry. Do not combine a concept with another candidate's path.
+13. Cover every explicit source fact in the block, including schedule facts at
+    the end of a paragraph. Do not silently omit a fact because other tables are long.
 """
 
     def __init__(
@@ -76,15 +83,19 @@ Rules:
         *,
         retriever: OntologyRetriever | None = None,
         unit_normalizer: UnitNormalizer | None = None,
-        top_k: int = 8,
+        top_k: int = 40,
+        contract_retries: int = 1,
     ) -> None:
         if top_k < 1:
             raise ValueError("top_k must be at least 1")
+        if contract_retries < 0:
+            raise ValueError("contract_retries must be non-negative")
         self._registry = registry
         self._provider = provider
         self._retriever = retriever or OntologyRetriever(registry, default_top_k=top_k)
         self._unit_normalizer = unit_normalizer or UnitNormalizer()
         self.top_k = top_k
+        self.contract_retries = contract_retries
 
     async def map_document(self, document: RawDocument) -> SemanticMappingBatch:
         """Map every block and retain mapped and unresolved outcomes."""
@@ -106,15 +117,25 @@ Rules:
             return [self._automatic_unmapped(document, block)]
 
         prompt = self._build_prompt(document, block, candidates)
-        generated = await self._provider.structured_generate(
-            prompt,
-            SemanticModelResponse,
-        )
-        response = self._validate_structured_response(generated, block)
-        return [
-            self._materialize(document, block, draft, candidates)
-            for draft in response.mappings
-        ]
+        for attempt in range(self.contract_retries + 1):
+            generated = await self._provider.structured_generate(
+                prompt,
+                SemanticModelResponse,
+            )
+            try:
+                response = self._validate_structured_response(generated, block)
+                materialized = [
+                    self._materialize(document, block, draft, candidates)
+                    for draft in response.mappings
+                ]
+                self._validate_mapping_completeness(materialized, block)
+                self._validate_mapping_relationships(materialized, block)
+                return materialized
+            except SemanticAgentContractError as exc:
+                if attempt >= self.contract_retries:
+                    raise
+                prompt = self._correction_prompt(prompt, exc)
+        raise AssertionError("Semantic contract retry loop exhausted")
 
     def _buildable_candidates(self, block: RawBlock) -> list[OntologyCandidate]:
         retrieval_limit = max(self.top_k * 3, self.top_k)
@@ -138,6 +159,7 @@ Rules:
                 continue
             item = candidate.as_prompt_dict()
             item["canonical_path_template"] = contract.path_template
+            item["value_contract"] = self._value_contract(candidate.concept_id)
             candidate_payload.append(item)
 
         payload = {
@@ -161,6 +183,76 @@ Rules:
             sort_keys=True,
             default=str,
             separators=(",", ":"),
+        )
+
+    @staticmethod
+    def _value_contract(concept_id: str) -> dict[str, object]:
+        if concept_id == "scal.relative_permeability":
+            return {
+                "type": "object",
+                "required": ["phase_system"],
+                "properties": {
+                    "id": "stable table identifier; usually the sample id",
+                    "sample_id": "source sample identifier when stated",
+                    "phase_system": ["oil", "water"],
+                    "displacement_type": "source displacement type when stated",
+                },
+                "example": {
+                    "id": "X-12",
+                    "sample_id": "X-12",
+                    "phase_system": ["oil", "water"],
+                    "displacement_type": "waterflood",
+                },
+            }
+        if concept_id.endswith(".pvt"):
+            return {
+                "type": "object",
+                "required": ["model_type"],
+                "properties": {"model_type": {"enum": ["table", "constant"]}},
+                "example": {"model_type": "table"},
+            }
+        if concept_id == "well":
+            return {
+                "type": "string",
+                "rule": "must equal the well_id selector used in canonical_path",
+            }
+        well_types = {
+            "well.producer": "producer",
+            "well.water_injector": "water_injector",
+            "well.gas_injector": "gas_injector",
+        }
+        if concept_id in well_types:
+            return {"type": "string", "const": well_types[concept_id]}
+        if concept_id == "schedule.report_interval":
+            return {
+                "type": "number",
+                "rule": (
+                    "For explicit frequency terms, use one named period; for "
+                    "example quarterly/每季度 is value 1 with source_unit quarter."
+                ),
+            }
+        return {"type": "source value"}
+
+    @staticmethod
+    def _correction_prompt(
+        original_prompt: str,
+        error: SemanticAgentContractError,
+    ) -> str:
+        return (
+            original_prompt
+            + "\nCORRECTION REQUIRED:\n"
+            + json.dumps(
+                {
+                    "error_code": error.code,
+                    "error_message": str(error),
+                    "instruction": (
+                        "Regenerate the complete JSON response. Correct the rejected "
+                        "mapping while preserving all valid source facts."
+                    ),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
         )
 
     def _validate_structured_response(
@@ -235,6 +327,7 @@ Rules:
                     ),
                     source_block_id=block.block_id,
                 )
+            self._validate_structural_value(draft, block)
             if concept.canonical_unit is not None and draft.source_unit is None:
                 raise SemanticAgentContractError(
                     "SOURCE_UNIT_REQUIRED",
@@ -293,6 +386,121 @@ Rules:
             confidence=draft.confidence,
             provenance=provenance,
         )
+
+    @staticmethod
+    def _validate_structural_value(
+        draft: MappedMappingDraft,
+        block: RawBlock,
+    ) -> None:
+        if draft.ontology_concept == "scal.relative_permeability":
+            if not isinstance(draft.value, Mapping) or not isinstance(
+                draft.value.get("phase_system"),
+                list,
+            ):
+                raise SemanticAgentContractError(
+                    "STRUCTURAL_VALUE_OUTSIDE_CONTRACT",
+                    "Relative-permeability table value requires phase_system metadata.",
+                    source_block_id=block.block_id,
+                )
+        if draft.ontology_concept.endswith(".pvt"):
+            if (
+                not isinstance(draft.value, Mapping)
+                or draft.value.get("model_type") not in {"table", "constant"}
+            ):
+                raise SemanticAgentContractError(
+                    "STRUCTURAL_VALUE_OUTSIDE_CONTRACT",
+                    "PVT table value requires model_type metadata.",
+                    source_block_id=block.block_id,
+                )
+
+    def _validate_mapping_relationships(
+        self,
+        mappings: list[SemanticMappingOutcome],
+        block: RawBlock,
+    ) -> None:
+        well_types: dict[str, str] = {}
+        for mapping in mappings:
+            if not isinstance(mapping, SemanticMapping):
+                continue
+            match = re.fullmatch(r"wells\[([^\]]+)\]\.well_type", mapping.canonical_path)
+            if match is not None:
+                well_types[match.group(1)] = mapping.ontology_concept
+
+        for mapping in mappings:
+            if not isinstance(mapping, SemanticMapping):
+                continue
+            match = re.match(r"wells\[([^\]]+)\]\.", mapping.canonical_path)
+            if match is None or match.group(1) not in well_types:
+                continue
+            targets = self._registry.get_relationships(
+                mapping.ontology_concept
+            ).get("applies_to", ())
+            if not targets:
+                continue
+            well_concept = well_types[match.group(1)]
+            if not any(
+                self._same_or_descendant(well_concept, target) for target in targets
+            ):
+                raise SemanticAgentContractError(
+                    "ONTOLOGY_RELATIONSHIP_CONFLICT",
+                    (
+                        f"{mapping.ontology_concept!r} does not apply to "
+                        f"{well_concept!r} for well {match.group(1)!r}."
+                    ),
+                    source_block_id=block.block_id,
+                )
+
+    @staticmethod
+    def _validate_mapping_completeness(
+        mappings: list[SemanticMappingOutcome],
+        block: RawBlock,
+    ) -> None:
+        mapped = [
+            mapping
+            for mapping in mappings
+            if isinstance(mapping, SemanticMapping)
+        ]
+        paths = [mapping.canonical_path for mapping in mapped]
+        duplicate_paths = sorted(
+            {path for path in paths if paths.count(path) > 1}
+        )
+        if duplicate_paths:
+            raise SemanticAgentContractError(
+                "DUPLICATE_CANONICAL_PATH",
+                f"Provider returned duplicate canonical paths: {duplicate_paths}",
+                source_block_id=block.block_id,
+            )
+
+        concept_ids = {mapping.ontology_concept for mapping in mapped}
+        missing_parents: list[str] = []
+        for parent in (
+            "fluid.oil.pvt",
+            "fluid.water.pvt",
+            "fluid.gas.pvt",
+            "scal.relative_permeability",
+        ):
+            if any(
+                concept_id.startswith(parent + ".")
+                for concept_id in concept_ids
+            ) and parent not in concept_ids:
+                missing_parents.append(parent)
+        if missing_parents:
+            raise SemanticAgentContractError(
+                "REQUIRED_STRUCTURAL_MAPPING_MISSING",
+                (
+                    "Child values require their structural table mappings: "
+                    f"{missing_parents}"
+                ),
+                source_block_id=block.block_id,
+            )
+
+    def _same_or_descendant(self, concept_id: str, ancestor_id: str) -> bool:
+        current: str | None = concept_id
+        while current is not None:
+            if current == ancestor_id:
+                return True
+            current = self._registry.get_concept(current).parent
+        return False
 
     def _automatic_unmapped(
         self,

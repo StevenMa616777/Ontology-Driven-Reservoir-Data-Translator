@@ -61,7 +61,20 @@ def canonical_demo() -> ReservoirSimulationModel:
                     ],
                 ),
             ),
-            water=FluidPhaseModel(density=_value(1000, "kg/m3")),
+            water=FluidPhaseModel(
+                density=_value(1000, "kg/m3"),
+                pvt=PVTModel(
+                    model_type="table",
+                    points=[
+                        PVTPoint(
+                            pressure=_value(300, "bar"),
+                            formation_volume_factor=_value(1.02, "rm3/sm3"),
+                            viscosity=_value(0.45, "cP"),
+                            compressibility=_value(4.2e-5, "1/bar"),
+                        )
+                    ],
+                ),
+            ),
             gas=FluidPhaseModel(density=_value(0.8, "kg/m3")),
         ),
         scal=SCALModel(

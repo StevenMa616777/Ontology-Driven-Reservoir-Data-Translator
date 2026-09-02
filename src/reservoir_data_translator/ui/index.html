@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f3f0e8" />
+    <title>Reservoir Translator Workbench</title>
+    <meta
+      name="description"
+      content="Ontology-driven reservoir data translation review workbench"
+    />
+    <link rel="stylesheet" href="/ui/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Reservoir Translator 首页">
+        <span class="brand-mark">RT</span>
+        <span>
+          <strong>Reservoir Translator</strong>
+          <small>Ontology-driven workbench</small>
+        </span>
+      </a>
+      <div class="system-badges" aria-label="系统原则">
+        <span class="badge badge-neutral">v0.1 PoC</span>
+        <span class="badge badge-success">确定性导出</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero" aria-labelledby="page-title">
+        <p class="eyebrow">TRANSLATION CONTROL DESK</p>
+        <h1 id="page-title">从客户原始资料到数模输出，<br /><em>每一步都有证据。</em></h1>
+        <p class="hero-copy">
+          语义映射由模型理解，Canonical 构建、校验与平台转换由确定性代码完成。
+        </p>
+      </section>
+
+      <nav class="pipeline-rail" aria-label="转换流程">
+        <span class="rail-step is-active"><b>01</b>Source</span>
+        <span class="rail-arrow">→</span>
+        <span class="rail-step"><b>02</b>Semantic</span>
+        <span class="rail-arrow">→</span>
+        <span class="rail-step"><b>03</b>Review</span>
+        <span class="rail-arrow">→</span>
+        <span class="rail-step"><b>04</b>Canonical</span>
+        <span class="rail-arrow">→</span>
+        <span class="rail-step"><b>05</b>Target</span>
+      </nav>
+
+      <section class="workspace-grid">
+        <article class="panel source-panel">
+          <div class="panel-heading">
+            <div><span class="step-label">STEP 01</span><h2>导入原始资料</h2></div>
+            <span class="panel-note">TXT · JSON · CSV · XLSX</span>
+          </div>
+          <div class="dropzone" id="dropzone">
+            <div class="drop-prompt">
+              <span class="drop-icon">+</span>
+              <strong>将文件拖到这里</strong>
+              <span>或选择本地文件，单文件上限 16 MB</span>
+              <label class="button button-secondary" for="file-input">选择文件</label>
+            </div>
+            <input id="file-input" type="file" accept=".txt,.json,.csv,.xlsx" hidden />
+            <div class="file-summary" id="file-summary" hidden>
+              <span class="file-glyph">DOC</span>
+              <span><strong id="file-name"></strong><small id="file-size"></small></span>
+              <button id="clear-file" type="button" aria-label="移除已选文件">×</button>
+            </div>
+          </div>
+          <div class="or-divider"><span>或直接粘贴</span></div>
+          <textarea id="source-input" placeholder="粘贴井控、PVT、SCAL 或者调度数据…"></textarea>
+        </article>
+
+        <aside class="panel run-panel">
+          <div class="panel-heading">
+            <div><span class="step-label">RUN SETUP</span><h2>转换配置</h2></div>
+          </div>
+          <fieldset>
+            <legend>目标平台</legend>
+            <div class="segmented-control">
+              <label><input type="radio" name="target" value="eclipse" checked /><span>Eclipse</span></label>
+              <label><input type="radio" name="target" value="cmg" /><span>CMG</span></label>
+            </div>
+          </fieldset>
+          <label class="field-label" for="source-system">客户源映射</label>
+          <select id="source-system">
+            <option value="">自动 / 通用</option>
+            <option value="client_a">Client A</option>
+            <option value="client_b">Client B</option>
+            <option value="client_c">Client C</option>
+          </select>
+          <button class="button button-primary" id="run-button" type="button">开始翻译 <span>→</span></button>
+          <p class="safety-note"><b>安全边界</b><br />歧义、未映射或低置信度数据会停在 Review，不会自动生成目标文件。</p>
+        </aside>
+      </section>
+
+      <section class="empty-state" id="result-root" aria-live="polite">
+        <span class="empty-index">02—05</span>
+        <div><h2>等待一次转换</h2><p>语义映射、审查结果、Canonical JSON 与平台输出将在这里展开。</p></div>
+      </section>
+    </main>
+
+    <script src="/ui/app.js" defer></script>
+  </body>
+</html>

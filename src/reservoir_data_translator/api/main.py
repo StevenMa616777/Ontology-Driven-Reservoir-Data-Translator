@@ -8,6 +8,8 @@ from typing import Iterable
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from reservoir_data_translator.canonical import (
     CanonicalBuildError,
@@ -52,6 +54,7 @@ from .service import (
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+UI_ROOT = Path(__file__).resolve().parent.parent / "ui"
 
 
 def _configured_path(environment_name: str, default_name: str) -> Path | None:
@@ -141,6 +144,11 @@ def create_app(
         description="Ontology-driven staged reservoir data translation PoC.",
     )
     api.state.services = services
+    api.mount("/ui", StaticFiles(directory=UI_ROOT), name="ui")
+
+    @api.get("/", include_in_schema=False)
+    def workbench() -> FileResponse:
+        return FileResponse(UI_ROOT / "index.html")
 
     def service() -> PipelineServices:
         configured = api.state.services

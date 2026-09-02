@@ -25,6 +25,16 @@ class FakeProvider(SemanticModelProvider):
         return self.response
 
 
+class SequenceProvider(SemanticModelProvider):
+    def __init__(self, responses: list[object]) -> None:
+        self.responses = iter(responses)
+        self.prompts: list[str] = []
+
+    async def structured_generate(self, prompt: str, response_model: type[Any]) -> Any:
+        self.prompts.append(prompt)
+        return next(self.responses)
+
+
 def _document(block: RawBlock) -> RawDocument:
     return RawDocument(
         source_id="client-a",
@@ -217,6 +227,148 @@ async def test_agent_rejects_free_text_provider_output(
         )
 
     assert error.value.code == "INVALID_STRUCTURED_OUTPUT"
+
+
+@pytest.mark.asyncio
+async def test_agent_retries_structural_value_contract(
+    registry: OntologyRegistry,
+) -> None:
+    block = RawBlock(
+        block_id="block_0001",
+        block_type="text",
+        content="Oil PVT pressure 100 bar, Bo 1.2 rm3/sm3, viscosity 2.5 cP",
+    )
+    base_mapping = {
+        "status": "MAPPED",
+        "source_block_id": "block_0001",
+        "ontology_concept": "fluid.oil.pvt",
+        "canonical_path": "fluids.oil.pvt",
+        "confidence": 0.95,
+    }
+    provider = SequenceProvider(
+        [
+            {"mappings": [{**base_mapping, "value": None}]},
+            {
+                "mappings": [
+                    {**base_mapping, "value": {"model_type": "table"}}
+                ]
+            },
+        ]
+    )
+
+    result = await SemanticMappingAgent(registry, provider).map_document(
+        _document(block)
+    )
+
+    assert result.mapped[0].value == {"model_type": "table"}
+    assert len(provider.prompts) == 2
+    assert "STRUCTURAL_VALUE_OUTSIDE_CONTRACT" in provider.prompts[1]
+
+
+@pytest.mark.asyncio
+async def test_agent_retries_missing_pvt_parent_mapping(
+    registry: OntologyRegistry,
+) -> None:
+    block = RawBlock(
+        block_id="block_0001",
+        block_type="text",
+        content="Oil PVT pressure 100 bar",
+    )
+    point = {
+        "status": "MAPPED",
+        "source_block_id": "block_0001",
+        "ontology_concept": "fluid.oil.pvt.pressure",
+        "canonical_path": "fluids.oil.pvt.points[0].pressure",
+        "value": 100,
+        "source_unit": "bar",
+        "canonical_unit": "bar",
+        "confidence": 0.98,
+    }
+    table = {
+        "status": "MAPPED",
+        "source_block_id": "block_0001",
+        "ontology_concept": "fluid.oil.pvt",
+        "canonical_path": "fluids.oil.pvt",
+        "value": {"model_type": "table"},
+        "canonical_unit": None,
+        "confidence": 0.98,
+    }
+    provider = SequenceProvider(
+        [
+            {"mappings": [point]},
+            {"mappings": [table, point]},
+        ]
+    )
+
+    result = await SemanticMappingAgent(registry, provider).map_document(
+        _document(block)
+    )
+
+    assert [mapping.ontology_concept for mapping in result.mapped] == [
+        "fluid.oil.pvt",
+        "fluid.oil.pvt.pressure",
+    ]
+    assert len(provider.prompts) == 2
+    assert "REQUIRED_STRUCTURAL_MAPPING_MISSING" in provider.prompts[1]
+
+
+@pytest.mark.asyncio
+async def test_agent_retries_control_that_conflicts_with_well_type(
+    registry: OntologyRegistry,
+) -> None:
+    block = RawBlock(
+        block_id="block_0001",
+        block_type="text",
+        content="C1 注水井定注入量 800 方/天，不是定液量控制",
+    )
+    well_type = {
+        "status": "MAPPED",
+        "source_block_id": "block_0001",
+        "ontology_concept": "well.water_injector",
+        "canonical_path": "wells[C1].well_type",
+        "value": "water_injector",
+        "canonical_unit": None,
+        "confidence": 0.99,
+    }
+    rate = {
+        "status": "MAPPED",
+        "source_block_id": "block_0001",
+        "canonical_path": "wells[C1].controls[liquid_rate].target",
+        "value": 800,
+        "source_unit": "m3/day",
+        "canonical_unit": "m3/day",
+        "confidence": 0.95,
+    }
+    provider = SequenceProvider(
+        [
+            {
+                "mappings": [
+                    well_type,
+                    {**rate, "ontology_concept": "well.control.liquid_rate"},
+                ]
+            },
+            {
+                "mappings": [
+                    well_type,
+                    {
+                        **rate,
+                        "ontology_concept": "well.control.water_injection_rate",
+                        "canonical_path": (
+                            "wells[C1].controls[water_injection_rate].target"
+                        ),
+                    },
+                ]
+            },
+        ]
+    )
+
+    result = await SemanticMappingAgent(registry, provider).map_document(
+        _document(block)
+    )
+
+    assert result.mapped[1].ontology_concept == "well.control.water_injection_rate"
+    assert len(provider.prompts) == 2
+    assert "ONTOLOGY_RELATIONSHIP_CONFLICT" in provider.prompts[1]
 
 
 @pytest.mark.asyncio

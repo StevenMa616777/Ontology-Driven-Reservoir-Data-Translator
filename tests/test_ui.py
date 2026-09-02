@@ -42,10 +42,15 @@ async def test_workbench_assets_expose_real_pipeline_and_review_gate(
     assert 'postJson("/translate"' in javascript.text
     assert 'mapping.confidence < 0.80' in javascript.text
     assert 'mapping.status !== "MAPPED"' in javascript.text
+    assert "function openSelectedFile()" in javascript.text
+    assert 'txt: "text/plain;charset=utf-8"' in javascript.text
+    assert "URL.createObjectURL(previewFile)" in javascript.text
+    assert 'fileSummary.addEventListener("click"' in javascript.text
     assert stylesheet.status_code == 200
     assert stylesheet.headers["content-type"].startswith("text/css")
     assert ".mapping-row" in stylesheet.text
     assert ".validation-grid" in stylesheet.text
+    assert ".file-summary:hover" in stylesheet.text
     await client.aclose()
 
 

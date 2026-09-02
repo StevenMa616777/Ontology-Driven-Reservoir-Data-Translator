@@ -61,9 +61,9 @@
               <label class="button button-secondary" for="file-input">选择文件</label>
             </div>
             <input id="file-input" type="file" accept=".txt,.json,.csv,.xlsx" hidden />
-            <div class="file-summary" id="file-summary" hidden>
+            <div class="file-summary" id="file-summary" role="button" tabindex="0" aria-label="打开已选文件" title="单击打开已选文件" hidden>
               <span class="file-glyph">DOC</span>
-              <span><strong id="file-name"></strong><small id="file-size"></small></span>
+              <span><strong id="file-name"></strong><small id="file-size"></small><small class="file-open-hint">单击打开文件</small></span>
               <button id="clear-file" type="button" aria-label="移除已选文件">×</button>
             </div>
           </div>

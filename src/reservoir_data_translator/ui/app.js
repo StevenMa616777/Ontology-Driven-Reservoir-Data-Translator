@@ -106,6 +106,28 @@ async function fileToSource(file) {
   };
 }
 
+function openSelectedFile() {
+  if (!state.file) return;
+  const extension = extensionFor(state.file.name);
+  const previewTypes = {
+    txt: "text/plain;charset=utf-8",
+    json: "application/json;charset=utf-8",
+    csv: "text/csv;charset=utf-8",
+  };
+  const previewFile = previewTypes[extension]
+    ? new Blob([state.file], { type: previewTypes[extension] })
+    : state.file;
+  const objectUrl = URL.createObjectURL(previewFile);
+  const opened = window.open(objectUrl, "_blank");
+  if (!opened) {
+    URL.revokeObjectURL(objectUrl);
+    renderError("FILE_OPEN_BLOCKED", "浏览器阻止了新窗口，请允许此站点打开弹出窗口后重试。");
+    return;
+  }
+  opened.opener = null;
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+}
+
 async function postJson(path, body) {
   const response = await fetch(path, {
     method: "POST",
@@ -432,7 +454,19 @@ async function runTranslation() {
 }
 
 elements.fileInput.addEventListener("change", (event) => setSelectedFile(event.target.files[0] || null));
-elements.clearFile.addEventListener("click", () => setSelectedFile(null));
+elements.fileSummary.addEventListener("click", (event) => {
+  if (event.target.closest("#clear-file")) return;
+  openSelectedFile();
+});
+elements.fileSummary.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  openSelectedFile();
+});
+elements.clearFile.addEventListener("click", (event) => {
+  event.stopPropagation();
+  setSelectedFile(null);
+});
 elements.runButton.addEventListener("click", runTranslation);
 elements.sourceInput.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key === "Enter") runTranslation();

@@ -68,10 +68,13 @@ h1 em { color: var(--green); font-weight: inherit; }
 .drop-prompt > span:not(.drop-icon) { color: var(--muted); font-size: 12px; }
 .dropzone.has-file .drop-prompt { display: none; }
 .drop-icon { width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid var(--green); border-radius: 50%; color: var(--green); font-size: 22px; }
-.file-summary { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 14px; text-align: left; }
+.file-summary { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 14px; padding: 8px; text-align: left; cursor: pointer; outline: none; transition: background .15s ease, box-shadow .15s ease; }
+.file-summary:hover { background: #edf4e5; }
+.file-summary:focus-visible { box-shadow: 0 0 0 3px rgba(11, 96, 77, .18); }
 .file-summary > span:nth-child(2) { min-width: 0; }
 .file-summary strong, .file-summary small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-summary small { margin-top: 4px; color: var(--muted); }
+.file-summary .file-open-hint { color: var(--green); font-size: 10px; }
 .file-glyph { width: 46px; height: 54px; display: grid; place-items: center; color: white; background: var(--green); font: 700 10px/1 ui-monospace, monospace; letter-spacing: .08em; }
 .file-summary button { width: 34px; height: 34px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; font-size: 20px; }
 .or-divider { display: flex; align-items: center; gap: 12px; margin: 18px 0; color: #929995; font-size: 10px; letter-spacing: .1em; }

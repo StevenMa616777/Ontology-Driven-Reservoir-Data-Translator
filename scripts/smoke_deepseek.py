@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from dataclasses import asdict
 from datetime import UTC, datetime
 import json
 from pathlib import Path
@@ -59,14 +58,14 @@ async def run(output_path: Path | None) -> dict[str, object]:
     if not validation.valid:
         raise RuntimeError("Canonical result did not pass L1-L3 validation.")
     if len(traces) != 1:
-        raise RuntimeError("Expected exactly one non-secret provider trace.")
+        raise RuntimeError("Expected exactly one provider trace.")
 
     artifact: dict[str, object] = {
         "timestamp_utc": datetime.now(UTC).isoformat(),
         "status": "passed",
         "elapsed_seconds": elapsed_seconds,
         "provider": provider.provider_name,
-        "call": asdict(traces[0]),
+        "call": traces[0].model_dump(mode="json"),
         "source_id": document.source_id,
         "semantic_mapping": batch.model_dump(mode="json"),
         "canonical_check": {

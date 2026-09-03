@@ -38,3 +38,6 @@ class SemanticModelProvider(ABC):
         response_model: type[ResponseModel],
     ) -> ResponseModel | dict[str, Any]:
         """Generate data conforming to the supplied Pydantic model."""
+
+    def record_contract_failure(self, code: str, message: str) -> None:
+        """Optionally annotate the latest provider call rejected by the agent."""

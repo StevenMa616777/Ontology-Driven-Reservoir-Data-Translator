@@ -21,6 +21,11 @@
         </span>
       </a>
       <div class="system-badges" aria-label="系统原则">
+        <nav class="product-nav" aria-label="主要页面">
+          <a class="is-active" href="/">Translation Workbench</a>
+          <a href="/ontology">Ontology Explorer</a>
+        </nav>
+        <button class="readability-toggle" type="button" data-readability-toggle aria-pressed="false" title="放大说明、详情和日志文字"><span aria-hidden="true">Aa</span> 放大文字</button>
         <span class="badge badge-neutral">v0.1 PoC</span>
         <span class="badge badge-success">确定性导出</span>
       </div>
@@ -61,9 +66,9 @@
               <label class="button button-secondary" for="file-input">选择文件</label>
             </div>
             <input id="file-input" type="file" accept=".txt,.json,.csv,.xlsx" hidden />
-            <div class="file-summary" id="file-summary" hidden>
+            <div class="file-summary" id="file-summary" role="button" tabindex="0" aria-label="打开已选文件" title="单击打开已选文件" hidden>
               <span class="file-glyph">DOC</span>
-              <span><strong id="file-name"></strong><small id="file-size"></small></span>
+              <span><strong id="file-name"></strong><small id="file-size"></small><small class="file-open-hint">单击打开文件</small></span>
               <button id="clear-file" type="button" aria-label="移除已选文件">×</button>
             </div>
           </div>
@@ -100,6 +105,7 @@
       </section>
     </main>
 
+    <script src="/ui/ui-preferences.js" defer></script>
     <script src="/ui/app.js" defer></script>
   </body>
 </html>

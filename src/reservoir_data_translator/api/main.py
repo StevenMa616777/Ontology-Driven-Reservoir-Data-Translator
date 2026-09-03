@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+import json
 import os
 from pathlib import Path
 from typing import Iterable
-from uuid import uuid4
+import unicodedata
+from uuid import UUID, uuid4
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from reservoir_data_translator.canonical import (
@@ -25,17 +28,20 @@ from reservoir_data_translator.mappers import (
 )
 from reservoir_data_translator.ontology import OntologyRegistry
 from reservoir_data_translator.semantic import (
+    DeepSeekCallTrace,
     DeepSeekProvider,
     SemanticAgentContractError,
     SemanticMappingBatch,
     SemanticModelProvider,
     SemanticProviderError,
     SourceMappingRegistry,
+    capture_deepseek_traces,
 )
 from reservoir_data_translator.validation import ValidationResult
 
 from .models import (
     CanonicalBuildRequest,
+    DeepSeekTraceSummary,
     ExportRequest,
     ExportResponse,
     SemanticMapRequest,
@@ -55,6 +61,7 @@ from .service import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 UI_ROOT = Path(__file__).resolve().parent.parent / "ui"
+DEFAULT_TRACE_ROOT = PROJECT_ROOT / "artifacts" / "deepseek_traces"
 
 
 def _configured_path(environment_name: str, default_name: str) -> Path | None:
@@ -119,6 +126,132 @@ def _default_semantic_provider() -> SemanticModelProvider | None:
     return DeepSeekProvider.from_environment(api_key_file=key_file)
 
 
+def _trace_root() -> Path:
+    configured = os.getenv("DEEPSEEK_TRACE_DIR")
+    return Path(configured).expanduser() if configured else DEFAULT_TRACE_ROOT
+
+
+def _persist_deepseek_trace(
+    translation_id: str,
+    source: RawDocument,
+    calls: list[DeepSeekCallTrace],
+    *,
+    semantic_status: str,
+) -> DeepSeekTraceSummary | None:
+    if not calls:
+        return None
+    trace_root = _trace_root()
+    trace_root.mkdir(parents=True, exist_ok=True)
+    trace_path = trace_root / f"{translation_id}.json"
+    readable_log_path = trace_root / f"{translation_id}.readable.log"
+    payload = {
+        "translation_id": translation_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "semantic_status": semantic_status,
+        "source": {
+            "source_id": source.source_id,
+            "file_name": source.file_name,
+            "source_type": source.source_type,
+            "block_count": len(source.blocks),
+        },
+        "summary": {
+            "api_requests": len(calls),
+            "retry_requests": sum(call.call_reason != "initial" for call in calls),
+            "local_corrections": sum(call.local_correction is not None for call in calls),
+            "avoided_network_retries": sum(
+                call.avoided_network_retry
+                and call.outcome == "accepted_after_local_correction"
+                for call in calls
+            ),
+            "input_tokens": sum(call.input_tokens or 0 for call in calls),
+            "output_tokens": sum(call.output_tokens or 0 for call in calls),
+            "total_tokens": sum(call.total_tokens or 0 for call in calls),
+            "duration_ms": round(sum(call.duration_ms for call in calls), 3),
+        },
+        "calls": [call.model_dump(mode="json") for call in calls],
+    }
+    temporary_path = trace_path.with_suffix(".json.tmp")
+    temporary_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    temporary_path.replace(trace_path)
+    temporary_log_path = readable_log_path.with_suffix(".log.tmp")
+    temporary_log_path.write_text(
+        _readable_deepseek_log(payload),
+        encoding="utf-8",
+    )
+    temporary_log_path.replace(readable_log_path)
+    summary = payload["summary"]
+    return DeepSeekTraceSummary(
+        **summary,
+        trace_url=f"/deepseek-traces/{translation_id}",
+        readable_log_url=f"/deepseek-traces/{translation_id}/readable",
+    )
+
+
+def _readable_deepseek_log(payload: dict) -> str:
+    """Render an observation-only log without JSON escaping or control characters."""
+
+    lines = [
+        f"Translation: {_readable_text(payload.get('translation_id'))}",
+        f"Created: {_readable_text(payload.get('created_at'))}",
+        f"Semantic status: {_readable_text(payload.get('semantic_status'))}",
+        "",
+    ]
+    for index, call in enumerate(payload.get("calls", []), start=1):
+        request = call.get("request_payload") or {}
+        lines.extend(
+            [
+                f"Call {index}",
+                f"Block: {_readable_text(call.get('source_block_id'))}",
+                f"Reason: {_readable_text(call.get('call_reason'))}",
+                f"Attempts: output {call.get('logical_attempt')} / network {call.get('transport_attempt')}",
+                f"Outcome: {_readable_text(call.get('outcome'))}",
+                f"Tokens: input {call.get('input_tokens')} / output {call.get('output_tokens')} / total {call.get('total_tokens')}",
+                f"Request instructions: {_readable_text(request.get('instructions'))}",
+                f"Request input: {_readable_text(request.get('input'))}",
+                f"Response output: {_readable_text(_response_output_text(call.get('response_payload')))}",
+            ]
+        )
+        if call.get("local_correction"):
+            lines.append(f"Local correction: {_readable_text(call.get('local_correction'))}")
+        if call.get("error_code"):
+            lines.append(
+                f"Error: {_readable_text(call.get('error_code'))} "
+                f"{_readable_text(call.get('error_message'))}"
+            )
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _response_output_text(response_payload: object) -> str:
+    if not isinstance(response_payload, dict):
+        return ""
+    parts: list[str] = []
+    for item in response_payload.get("output", []):
+        if not isinstance(item, dict):
+            continue
+        for content in item.get("content", []):
+            if isinstance(content, dict) and isinstance(content.get("text"), str):
+                parts.append(content["text"])
+    return " ".join(parts)
+
+
+def _readable_text(value: object) -> str:
+    text = "" if value is None else str(value)
+    text = text.replace("\\r\\n", " ").replace("\\n", " ").replace("\\r", " ").replace("\\t", " ")
+    cleaned: list[str] = []
+    for character in text:
+        if character == "\\" or character.isspace():
+            cleaned.append(" ")
+            continue
+        category = unicodedata.category(character)
+        if category[0] in {"L", "N", "P"} or character in "%°±×÷=<>^":
+            cleaned.append(character)
+    return " ".join("".join(cleaned).split())
+
+
 def create_app(
     *,
     registry: OntologyRegistry | None = None,
@@ -150,6 +283,10 @@ def create_app(
     def workbench() -> FileResponse:
         return FileResponse(UI_ROOT / "index.html")
 
+    @api.get("/ontology", include_in_schema=False)
+    def ontology_explorer() -> FileResponse:
+        return FileResponse(UI_ROOT / "ontology.html")
+
     def service() -> PipelineServices:
         configured = api.state.services
         if configured is None:
@@ -164,6 +301,105 @@ def create_app(
                 },
             )
         return configured
+
+    def ontology_graph_payload() -> dict:
+        registry = service().registry
+        concepts = registry.list_concepts()
+        incoming: dict[str, list[dict[str, str]]] = {
+            concept.concept_id: [] for concept in concepts
+        }
+        edges: list[dict[str, str]] = []
+        for concept in concepts:
+            if concept.parent is not None:
+                edges.append(
+                    {
+                        "id": f"hierarchy:{concept.parent}:{concept.concept_id}",
+                        "source": concept.parent,
+                        "target": concept.concept_id,
+                        "type": "parent",
+                    }
+                )
+                incoming[concept.concept_id].append(
+                    {"source": concept.parent, "type": "parent"}
+                )
+            for relation, targets in concept.relationships.items():
+                for target in targets:
+                    edges.append(
+                        {
+                            "id": f"{relation}:{concept.concept_id}:{target}",
+                            "source": concept.concept_id,
+                            "target": target,
+                            "type": relation,
+                        }
+                    )
+                    incoming[target].append(
+                        {"source": concept.concept_id, "type": relation}
+                    )
+
+        nodes = []
+        for concept in concepts:
+            domain = (
+                concept.concept_id.split(".", 1)[0]
+                if concept.parent is not None
+                else concept.concept_id
+            )
+            nodes.append(
+                {
+                    "id": concept.concept_id,
+                    "label": concept.name,
+                    "parent": concept.parent,
+                    "domain": domain,
+                    "description": concept.description,
+                    "value_type": concept.value_type,
+                    "dimension": concept.dimension,
+                    "canonical_unit": concept.canonical_unit,
+                    "aliases": list(concept.aliases),
+                    "constraints": dict(concept.constraints),
+                    "relationships": {
+                        relation: list(targets)
+                        for relation, targets in concept.relationships.items()
+                    },
+                    "incoming_relationships": incoming[concept.concept_id],
+                    "source_file": concept.source_file,
+                    "status": concept.status,
+                    "replaced_by": concept.replaced_by,
+                }
+            )
+
+        relationship_types = {
+            name: {
+                "description": rule.description,
+                "inverse": rule.inverse,
+            }
+            for name, rule in registry.convention.relationships.items()
+        }
+        relationship_types["parent"] = {
+            "description": "Concept hierarchy from parent to child.",
+            "inverse": None,
+        }
+        return {
+            "ontology": {
+                "name": registry.metadata.name,
+                "version": registry.metadata.version,
+                "namespace": registry.metadata.namespace,
+                "domain": registry.metadata.domain,
+            },
+            "nodes": nodes,
+            "edges": edges,
+            "relationship_types": relationship_types,
+        }
+
+    @api.get("/api/ontology/graph")
+    def ontology_graph() -> dict:
+        return ontology_graph_payload()
+
+    @api.get("/api/ontology/concepts/{concept_id:path}")
+    def ontology_concept(concept_id: str) -> dict:
+        payload = ontology_graph_payload()
+        for node in payload["nodes"]:
+            if node["id"] == concept_id:
+                return node
+        raise _http_error(404, "ONTOLOGY_CONCEPT_NOT_FOUND", f"Unknown concept {concept_id!r}.")
 
     @api.post("/ingest", response_model=RawDocument)
     def ingest(request: SourceInput) -> RawDocument:
@@ -234,6 +470,50 @@ def create_app(
             ),
         )
 
+    @api.get("/deepseek-traces/{translation_id}")
+    def deepseek_trace(translation_id: UUID) -> dict:
+        trace_path = _trace_root() / f"{translation_id}.json"
+        if not trace_path.is_file():
+            raise _http_error(
+                404,
+                "DEEPSEEK_TRACE_NOT_FOUND",
+                f"No DeepSeek trace exists for translation {translation_id}.",
+            )
+        try:
+            payload = json.loads(trace_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise _http_error(
+                500,
+                "DEEPSEEK_TRACE_UNAVAILABLE",
+                "The stored DeepSeek trace could not be read.",
+            ) from exc
+        if not isinstance(payload, dict):
+            raise _http_error(
+                500,
+                "DEEPSEEK_TRACE_INVALID",
+                "The stored DeepSeek trace is not a JSON object.",
+            )
+        return payload
+
+    @api.get("/deepseek-traces/{translation_id}/readable", response_class=PlainTextResponse)
+    def readable_deepseek_trace(translation_id: UUID) -> PlainTextResponse:
+        log_path = _trace_root() / f"{translation_id}.readable.log"
+        if not log_path.is_file():
+            raise _http_error(
+                404,
+                "DEEPSEEK_READABLE_LOG_NOT_FOUND",
+                f"No readable DeepSeek log exists for translation {translation_id}.",
+            )
+        try:
+            content = log_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise _http_error(
+                500,
+                "DEEPSEEK_READABLE_LOG_UNAVAILABLE",
+                "The stored readable DeepSeek log could not be read.",
+            ) from exc
+        return PlainTextResponse(content, media_type="text/plain; charset=utf-8")
+
     @api.post("/translate", response_model=TranslateResult)
     async def translate(request: TranslateRequest) -> TranslateResult:
         services = service()
@@ -245,11 +525,16 @@ def create_app(
         except IngestionError as exc:
             raise _http_error(422, exc.code, str(exc)) from exc
 
+        deepseek_calls: list[DeepSeekCallTrace] = []
+        semantic_status = "failed"
+        deepseek_trace_summary: DeepSeekTraceSummary | None = None
         try:
-            semantic = await services.semantic_map(
-                source,
-                source_system=request.source_system,
-            )
+            with capture_deepseek_traces() as deepseek_calls:
+                semantic = await services.semantic_map(
+                    source,
+                    source_system=request.source_system,
+                )
+            semantic_status = "success"
             trace.append(
                 TranslationTraceEvent(stage="semantic_map", status="success")
             )
@@ -261,6 +546,13 @@ def create_app(
             raise _http_error(422, "SOURCE_MAPPING_NOT_CONFIGURED", str(exc)) from exc
         except SemanticAgentContractError as exc:
             raise _http_error(502, exc.code, str(exc)) from exc
+        finally:
+            deepseek_trace_summary = _persist_deepseek_trace(
+                translation_id,
+                source,
+                deepseek_calls,
+                semantic_status=semantic_status,
+            )
 
         if not semantic.mappings or semantic.review_required:
             low_confidence = sum(
@@ -282,6 +574,7 @@ def create_app(
                 source=source,
                 semantic_mapping=semantic,
                 trace=trace,
+                deepseek_trace=deepseek_trace_summary,
             )
 
         try:
@@ -311,6 +604,7 @@ def create_app(
                 canonical_model=canonical,
                 validation=validation,
                 trace=trace,
+                deepseek_trace=deepseek_trace_summary,
             )
 
         try:
@@ -334,6 +628,7 @@ def create_app(
                 validation=validation,
                 export_validation=export_validation,
                 trace=trace,
+                deepseek_trace=deepseek_trace_summary,
             )
 
         try:
@@ -355,6 +650,7 @@ def create_app(
                 mapped_model=exported.mapped_model,
             ),
             trace=trace,
+            deepseek_trace=deepseek_trace_summary,
         )
 
     return api

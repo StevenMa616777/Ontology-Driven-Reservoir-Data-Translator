@@ -33,6 +33,7 @@ __all__ = [
     "AmbiguousSemanticMapping",
     "DeepSeekCallTrace",
     "DeepSeekProvider",
+    "capture_deepseek_traces",
     "IncompatibleUnitError",
     "InvalidMagnitudeError",
     "MappedMappingDraft",
@@ -62,6 +63,7 @@ __all__ = [
 _LAZY_EXPORTS = {
     "DeepSeekCallTrace": (".deepseek", "DeepSeekCallTrace"),
     "DeepSeekProvider": (".deepseek", "DeepSeekProvider"),
+    "capture_deepseek_traces": (".deepseek", "capture_deepseek_traces"),
     "OntologyCandidate": (".retriever", "OntologyCandidate"),
     "OntologyRetriever": (".retriever", "OntologyRetriever"),
     "SemanticAgentContractError": (

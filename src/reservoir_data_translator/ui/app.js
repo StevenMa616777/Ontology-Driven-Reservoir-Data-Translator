@@ -106,6 +106,28 @@ async function fileToSource(file) {
   };
 }
 
+function openSelectedFile() {
+  if (!state.file) return;
+  const extension = extensionFor(state.file.name);
+  const previewTypes = {
+    txt: "text/plain;charset=utf-8",
+    json: "application/json;charset=utf-8",
+    csv: "text/csv;charset=utf-8",
+  };
+  const previewFile = previewTypes[extension]
+    ? new Blob([state.file], { type: previewTypes[extension] })
+    : state.file;
+  const objectUrl = URL.createObjectURL(previewFile);
+  const opened = window.open(objectUrl, "_blank");
+  if (!opened) {
+    URL.revokeObjectURL(objectUrl);
+    renderError("FILE_OPEN_BLOCKED", "浏览器阻止了新窗口，请允许此站点打开弹出窗口后重试。");
+    return;
+  }
+  opened.opener = null;
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+}
+
 async function postJson(path, body) {
   const response = await fetch(path, {
     method: "POST",
@@ -126,6 +148,27 @@ async function postJson(path, body) {
       response.status,
     );
   }
+  return payload;
+}
+
+async function getJson(path) {
+  const response = await fetch(path);
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    const detail = payload?.detail;
+    throw new APIError(
+      detail?.code || `HTTP_${response.status}`,
+      detail?.message || "无法读取 DeepSeek Trace。",
+      response.status,
+    );
+  }
+  return payload;
+}
+
+async function getText(path) {
+  const response = await fetch(path);
+  const payload = await response.text();
+  if (!response.ok) throw new APIError(`HTTP_${response.status}`, "无法读取易读日志。", response.status);
   return payload;
 }
 
@@ -256,6 +299,45 @@ function renderTrace(trace) {
     <li class="trace-${event.status}"><span>${String(index + 1).padStart(2, "0")}</span><div><strong>${escapeHtml(event.stage.replaceAll("_", " "))}</strong>${event.detail ? `<small>${escapeHtml(event.detail)}</small>` : ""}</div><b>${escapeHtml(event.status)}</b></li>`).join("");
 }
 
+function renderDeepSeekTraceShell(summary) {
+  if (!summary) return "";
+  return `<section class="deepseek-trace-section">
+    <div class="deepseek-trace-heading">
+      <div><p class="step-label">DEEPSEEK API TRACE</p><h2>模型调用与 Token 明细</h2></div>
+      <button class="button button-secondary trace-toggle" type="button" data-toggle="deepseek-trace">显示调用明细</button>
+    </div>
+    <div class="trace-summary-grid">
+      <span><b>${summary.api_requests}</b> API 请求</span>
+      <span><b>${summary.retry_requests}</b> 重试</span>
+      <span><b>${summary.local_corrections ?? 0}</b> 本地更正通过</span>
+      <span><b>${summary.avoided_network_retries ?? 0}</b> 避免网络重试</span>
+      <span><b>${summary.input_tokens}</b> 输入 Tokens</span>
+      <span><b>${summary.output_tokens}</b> 输出 Tokens</span>
+      <span><b>${summary.total_tokens}</b> 总 Tokens</span>
+    </div>
+    <div id="deepseek-trace-detail" hidden></div>
+  </section>`;
+}
+
+function renderDeepSeekTraceDetail(trace, readableLog) {
+  const calls = trace.calls || [];
+  const rows = calls.map((call, index) => `<tr>
+    <td>${index + 1}</td>
+    <td><code>${escapeHtml(call.source_block_id || "—")}</code></td>
+    <td><span class="trace-reason">${escapeHtml(call.call_reason)}</span></td>
+    <td title="输出格式或 Schema 重试 / HTTP 网络传输重试">${call.logical_attempt} / ${call.transport_attempt}</td>
+    <td>${escapeHtml(call.input_tokens ?? "—")}</td>
+    <td>${escapeHtml(call.output_tokens ?? "—")}</td>
+    <td><b>${escapeHtml(call.total_tokens ?? "—")}</b></td>
+    <td>${Number(call.duration_ms || 0).toFixed(0)} ms</td>
+    <td><strong>${escapeHtml(call.outcome)}</strong>${call.local_correction ? `<small class="trace-call-repair">本地更正：${escapeHtml(call.local_correction)}</small>` : ""}${call.error_code ? `<small class="trace-call-error">${escapeHtml(call.error_code)}</small>` : ""}</td>
+    <td><details><summary>查看</summary><div class="trace-payloads"><div><h4>发送给 API 的 Prompt / Request</h4><pre>${escapeHtml(JSON.stringify(call.request_payload, null, 2))}</pre></div><div><h4>API 返回内容</h4><pre>${escapeHtml(JSON.stringify(call.response_payload, null, 2))}</pre></div></div></details></td>
+  </tr>`).join("");
+  return `<div class="trace-file-meta">文件：${escapeHtml(trace.source?.file_name)} · 状态：${escapeHtml(trace.semantic_status)} · ${escapeHtml(trace.created_at)}</div>
+    <div class="trace-table-wrap"><table class="deepseek-trace-table"><thead><tr><th>#</th><th>Block</th><th>调用原因</th><th title="左侧为输出尝试，右侧为网络尝试">输出尝试 / 网络尝试</th><th>输入</th><th>输出</th><th>总 Token</th><th>耗时</th><th>状态</th><th>内容</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <details class="readable-trace-log"><summary>查看去除转义与特殊字符的易读日志</summary><pre>${escapeHtml(readableLog || "易读日志未生成。")}</pre></details>`;
+}
+
 function emptyStage(message) {
   return `<div class="stage-empty"><span>—</span><p>${escapeHtml(message)}</p></div>`;
 }
@@ -314,6 +396,7 @@ function renderResult(result) {
       ${targetContent ? '<p class="target-disclaimer">当前为 PoC 平台片段。Eclipse 井控输出仍需要宿主 Deck 的 WELSPECS / COMPDAT 上下文；CMG 为未验证版本的 IMEX-style 片段。</p>' : ""}
     </section>
 
+    ${renderDeepSeekTraceShell(result.deepseek_trace)}
     <section class="trace-section"><p class="step-label">EXECUTION TRACE</p><ol>${renderTrace(result.trace)}</ol></section>`;
   wireResultActions();
 }
@@ -383,6 +466,31 @@ function wireResultActions() {
   }));
   reviewButton?.addEventListener("click", continueAfterReview);
 
+  document.querySelector('[data-toggle="deepseek-trace"]')?.addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    const detail = document.querySelector("#deepseek-trace-detail");
+    if (!detail) return;
+    if (!detail.hidden) {
+      detail.hidden = true;
+      button.textContent = "显示调用明细";
+      return;
+    }
+    detail.hidden = false;
+    button.textContent = "隐藏调用明细";
+    if (detail.dataset.loaded === "true") return;
+    detail.innerHTML = '<p class="trace-loading">正在读取本地 Trace 文件…</p>';
+    try {
+      const [trace, readableLog] = await Promise.all([
+        getJson(state.result.deepseek_trace.trace_url),
+        getText(state.result.deepseek_trace.readable_log_url),
+      ]);
+      detail.innerHTML = renderDeepSeekTraceDetail(trace, readableLog);
+      detail.dataset.loaded = "true";
+    } catch (error) {
+      detail.innerHTML = `<p class="trace-load-error">${escapeHtml(error.message || "Trace 读取失败。")}</p>`;
+    }
+  });
+
   document.querySelector('[data-copy="canonical"]')?.addEventListener("click", (event) => {
     copyWithFeedback(event.currentTarget, JSON.stringify(state.result.canonical_model, null, 2));
   });
@@ -432,7 +540,19 @@ async function runTranslation() {
 }
 
 elements.fileInput.addEventListener("change", (event) => setSelectedFile(event.target.files[0] || null));
-elements.clearFile.addEventListener("click", () => setSelectedFile(null));
+elements.fileSummary.addEventListener("click", (event) => {
+  if (event.target.closest("#clear-file")) return;
+  openSelectedFile();
+});
+elements.fileSummary.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  openSelectedFile();
+});
+elements.clearFile.addEventListener("click", (event) => {
+  event.stopPropagation();
+  setSelectedFile(null);
+});
 elements.runButton.addEventListener("click", runTranslation);
 elements.sourceInput.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key === "Enter") runTranslation();

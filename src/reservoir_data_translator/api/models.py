@@ -68,6 +68,19 @@ class TranslationTraceEvent(CanonicalModel):
     detail: str | None = None
 
 
+class DeepSeekTraceSummary(CanonicalModel):
+    api_requests: int
+    retry_requests: int
+    local_corrections: int
+    avoided_network_retries: int
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    duration_ms: float
+    trace_url: NonEmptyString
+    readable_log_url: NonEmptyString
+
+
 class TranslateResult(CanonicalModel):
     translation_id: NonEmptyString
     status: Literal[
@@ -83,3 +96,4 @@ class TranslateResult(CanonicalModel):
     export_validation: ValidationResult | None = None
     target: TargetArtifact | None = None
     trace: list[TranslationTraceEvent] = Field(default_factory=list)
+    deepseek_trace: DeepSeekTraceSummary | None = None

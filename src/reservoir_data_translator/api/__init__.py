@@ -3,6 +3,7 @@
 from .main import app, create_app
 from .models import (
     CanonicalBuildRequest,
+    DeepSeekTraceSummary,
     ExportRequest,
     ExportResponse,
     SemanticMapRequest,
@@ -17,6 +18,7 @@ from .service import PipelineServices
 
 __all__ = [
     "CanonicalBuildRequest",
+    "DeepSeekTraceSummary",
     "ExportRequest",
     "ExportResponse",
     "PipelineServices",

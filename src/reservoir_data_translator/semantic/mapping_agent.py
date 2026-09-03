@@ -32,6 +32,14 @@ from .retriever import OntologyCandidate, OntologyRetriever
 from .unit_normalizer import UnitNormalizer
 
 
+_STRUCTURAL_PARENT_CONCEPTS = (
+    "fluid.oil.pvt",
+    "fluid.water.pvt",
+    "fluid.gas.pvt",
+    "scal.relative_permeability",
+)
+
+
 class SemanticAgentContractError(ValueError):
     """The provider violated a supplied ontology or canonical contract."""
 
@@ -74,6 +82,11 @@ Rules:
     candidate entry. Do not combine a concept with another candidate's path.
 13. Cover every explicit source fact in the block, including schedule facts at
     the end of a paragraph. Do not silently omit a fact because other tables are long.
+14. Structural parent mappings are mandatory. For every concept listed in
+    required_structural_parents, if any returned ontology_concept starts with that
+    parent plus ".", return exactly one mapping for the parent before all of its child
+    mappings. The parent is required even when its structural value is not written
+    verbatim in the source, and its value must conform to value_contract.
 """
 
     def __init__(
@@ -132,6 +145,7 @@ Rules:
                 self._validate_mapping_relationships(materialized, block)
                 return materialized
             except SemanticAgentContractError as exc:
+                self._provider.record_contract_failure(exc.code, str(exc))
                 if attempt >= self.contract_retries:
                     raise
                 prompt = self._correction_prompt(prompt, exc)
@@ -140,11 +154,35 @@ Rules:
     def _buildable_candidates(self, block: RawBlock) -> list[OntologyCandidate]:
         retrieval_limit = max(self.top_k * 3, self.top_k)
         retrieved = self._retriever.retrieve(block, top_k=retrieval_limit)
-        return [
+        selected = [
             candidate
             for candidate in retrieved
             if get_canonical_mapping_contract(candidate.concept_id) is not None
         ][: self.top_k]
+        selected_ids = {candidate.concept_id for candidate in selected}
+        retrieved_by_id = {candidate.concept_id: candidate for candidate in retrieved}
+        required_parents = {
+            parent
+            for candidate in selected
+            if (parent := self._required_structural_parent(candidate.concept_id))
+            is not None
+        }
+        for parent in sorted(required_parents - selected_ids):
+            parent_candidate = retrieved_by_id.get(parent)
+            if parent_candidate is None:
+                child_scores = [
+                    candidate.score
+                    for candidate in selected
+                    if self._required_structural_parent(candidate.concept_id) == parent
+                ]
+                parent_candidate = OntologyCandidate(
+                    concept=self._registry.get_concept(parent),
+                    score=max(child_scores),
+                    match_type="required_parent",
+                    matched_terms=(),
+                )
+            selected.append(parent_candidate)
+        return selected
 
     def _build_prompt(
         self,
@@ -153,7 +191,7 @@ Rules:
         candidates: list[OntologyCandidate],
     ) -> str:
         candidate_payload: list[dict[str, object]] = []
-        for candidate in candidates:
+        for candidate in self._structurally_ordered_candidates(candidates):
             contract = get_canonical_mapping_contract(candidate.concept_id)
             if contract is None:  # protected by _buildable_candidates
                 continue
@@ -174,6 +212,7 @@ Rules:
                 for context_block in document.blocks
             ],
             "ontology_candidates": candidate_payload,
+            "required_structural_parents": list(_STRUCTURAL_PARENT_CONCEPTS),
             "allowed_source_units": list(self._unit_normalizer.supported_units),
             "canonical_schema": ReservoirSimulationModel.model_json_schema(),
         }
@@ -184,6 +223,42 @@ Rules:
             default=str,
             separators=(",", ":"),
         )
+
+    @staticmethod
+    def _required_structural_parent(concept_id: str) -> str | None:
+        for parent in _STRUCTURAL_PARENT_CONCEPTS:
+            if concept_id.startswith(parent + "."):
+                return parent
+        return None
+
+    @classmethod
+    def _structurally_ordered_candidates(
+        cls,
+        candidates: list[OntologyCandidate],
+    ) -> list[OntologyCandidate]:
+        original_positions = {
+            candidate.concept_id: index for index, candidate in enumerate(candidates)
+        }
+        group_positions: dict[str, int] = {}
+        for candidate in candidates:
+            parent = cls._required_structural_parent(candidate.concept_id)
+            group = parent or candidate.concept_id
+            group_positions[group] = min(
+                group_positions.get(group, original_positions[candidate.concept_id]),
+                original_positions[candidate.concept_id],
+            )
+
+        def sort_key(candidate: OntologyCandidate) -> tuple[int, int, int]:
+            parent = cls._required_structural_parent(candidate.concept_id)
+            group = parent or candidate.concept_id
+            parent_first = 0 if candidate.concept_id in _STRUCTURAL_PARENT_CONCEPTS else 1
+            return (
+                group_positions[group],
+                parent_first,
+                original_positions[candidate.concept_id],
+            )
+
+        return sorted(candidates, key=sort_key)
 
     @staticmethod
     def _value_contract(concept_id: str) -> dict[str, object]:
@@ -473,12 +548,7 @@ Rules:
 
         concept_ids = {mapping.ontology_concept for mapping in mapped}
         missing_parents: list[str] = []
-        for parent in (
-            "fluid.oil.pvt",
-            "fluid.water.pvt",
-            "fluid.gas.pvt",
-            "scal.relative_permeability",
-        ):
+        for parent in _STRUCTURAL_PARENT_CONCEPTS:
             if any(
                 concept_id.startswith(parent + ".")
                 for concept_id in concept_ids

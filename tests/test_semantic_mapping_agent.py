@@ -1,3 +1,4 @@
+import json
 from typing import Any
 
 import pytest
@@ -310,6 +311,31 @@ async def test_agent_retries_missing_pvt_parent_mapping(
     ]
     assert len(provider.prompts) == 2
     assert "REQUIRED_STRUCTURAL_MAPPING_MISSING" in provider.prompts[1]
+    assert "Structural parent mappings are mandatory" in provider.prompts[0]
+    prompt_payload = json.loads(provider.prompts[0].split("INPUT:\n", 1)[1])
+    prompt_candidates = prompt_payload["ontology_candidates"]
+    oil_parent = next(
+        candidate
+        for candidate in prompt_candidates
+        if candidate["concept_id"] == "fluid.oil.pvt"
+    )
+    oil_pressure = next(
+        candidate
+        for candidate in prompt_candidates
+        if candidate["concept_id"] == "fluid.oil.pvt.pressure"
+    )
+    assert prompt_payload["required_structural_parents"] == [
+        "fluid.oil.pvt",
+        "fluid.water.pvt",
+        "fluid.gas.pvt",
+        "scal.relative_permeability",
+    ]
+    assert all(
+        "required_parent_concept" not in candidate
+        and "required_for_descendants" not in candidate
+        for candidate in prompt_candidates
+    )
+    assert prompt_candidates.index(oil_parent) < prompt_candidates.index(oil_pressure)
 
 
 @pytest.mark.asyncio

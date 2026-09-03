@@ -55,7 +55,9 @@ export DEEPSEEK_TIMEOUT_SECONDS='120'
 ```
 
 项目兼容被忽略的 `LLM/DeepSeek/api_key`，但环境变量或项目外 key 文件更适合可控运行。
-应用不会把凭据写进 trace；验收 artifact 也不保存 Prompt。
+应用不会把凭据或 Authorization header 写进 trace。浏览器 `/translate` 流程的本地
+调用审计会保存完整 Prompt 和 Provider 响应，因此其中可能包含客户原始资料；该目录
+不得共享或提交到 Git。
 
 如果只需要 deterministic endpoint，可显式关闭 Provider：
 
@@ -81,7 +83,7 @@ export RESERVOIR_MAPPING_PATH='/absolute/path/to/mappings'
 
 ## 6. API 运行方式
 
-六个 endpoint：
+主要业务 endpoint：
 
 ```text
 POST /ingest
@@ -90,6 +92,7 @@ POST /canonical/build
 POST /validate
 POST /export/{platform}
 POST /translate
+GET /deepseek-traces/{translation_id}
 ```
 
 文本输入示例：
@@ -108,6 +111,23 @@ POST /translate
 
 XLSX 必须把二进制内容编码为 base64。浏览器工作台自动处理，当前 PoC 输入限制为
 16 MB。
+
+### DeepSeek 调用 Trace
+
+每次 `/translate` 对一个文件完成语义阶段后，应用把该文件触发的每一个真实 DeepSeek
+HTTP 请求保存为：
+
+```text
+artifacts/deepseek_traces/{translation_id}.json
+```
+
+记录包括 block、初次调用/合同重试/输出重试/网络重试、尝试序号、耗时、HTTP 状态、
+Token usage、完整请求 Payload（含 Prompt）和完整响应 Payload，但不包含 API key 和
+Authorization header。可以用 `DEEPSEEK_TRACE_DIR` 将目录改到项目外的受控位置。
+
+工作台转换结果中的“显示调用明细”按钮按需读取对应 Trace，并展示汇总表及每次请求/
+响应详情。由于 Trace 含原始资料和模型返回内容，应按客户资料的最高保密等级管理并
+定期清理。
 
 ## 7. 真实模型验收
 

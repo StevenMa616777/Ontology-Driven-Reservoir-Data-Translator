@@ -1,8 +1,10 @@
 import base64
 from io import BytesIO
+import json
 from pathlib import Path
 from typing import Any
 
+import httpx
 from httpx import ASGITransport, AsyncClient
 import pytest
 from openpyxl import Workbook
@@ -15,7 +17,58 @@ from reservoir_data_translator.mappers import (
     PlatformMappingRegistry,
 )
 from reservoir_data_translator.ontology import OntologyRegistry
+
+
+@pytest.mark.asyncio
+async def test_ontology_graph_exposes_runtime_concepts_and_typed_edges(
+    registry: OntologyRegistry,
+) -> None:
+    app = create_app(registry=registry)
+    client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+    response = await client.get("/api/ontology/graph")
+
+    assert response.status_code == 200
+    graph = response.json()
+    assert graph["ontology"]["version"] == registry.metadata.version
+    assert len(graph["nodes"]) == len(registry)
+    viscosity = next(node for node in graph["nodes"] if node["id"] == "fluid.oil.pvt.viscosity")
+    assert viscosity["canonical_unit"] == "cP"
+    assert viscosity["relationships"]["dependent_on"] == ["fluid.oil.pvt.pressure"]
+    assert any(
+        edge["source"] == "fluid.oil.pvt"
+        and edge["target"] == "fluid.oil.pvt.viscosity"
+        and edge["type"] == "parent"
+        for edge in graph["edges"]
+    )
+    assert any(
+        edge["source"] == "fluid.oil.pvt.viscosity"
+        and edge["target"] == "fluid.oil.pvt.pressure"
+        and edge["type"] == "dependent_on"
+        for edge in graph["edges"]
+    )
+    pressure = next(node for node in graph["nodes"] if node["id"] == "fluid.oil.pvt.pressure")
+    assert {"source": "fluid.oil.pvt.viscosity", "type": "dependent_on"} in pressure["incoming_relationships"]
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_ontology_concept_endpoint_returns_detail_and_404(
+    registry: OntologyRegistry,
+) -> None:
+    app = create_app(registry=registry)
+    client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+    response = await client.get("/api/ontology/concepts/fluid.oil.density")
+    missing = await client.get("/api/ontology/concepts/not.real")
+
+    assert response.status_code == 200
+    assert response.json()["source_file"].endswith("fluid.yaml")
+    assert missing.status_code == 404
+    assert missing.json()["detail"]["code"] == "ONTOLOGY_CONCEPT_NOT_FOUND"
+    await client.aclose()
 from reservoir_data_translator.semantic import (
+    DeepSeekProvider,
     SemanticModelProvider,
     SemanticProviderError,
     SourceMappingRegistry,
@@ -241,6 +294,100 @@ async def test_translate_returns_complete_trace_and_target(
         "export_validation",
         "render",
     ]
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_translate_persists_and_exposes_deepseek_call_trace(
+    registry: OntologyRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("DEEPSEEK_TRACE_DIR", str(tmp_path / "deepseek-traces"))
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        request_payload = json.loads(request.content)
+        assert "A15井采用定液生产制度" in request_payload["input"]
+        mappings = await APIWellProvider().structured_generate("", object)
+        return httpx.Response(
+            200,
+            json={
+                "id": "resp-api-trace",
+                "status": "completed",
+                "model": "deepseek-v4-flash",
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": (
+                                    "以下是结果：\n"
+                                    + json.dumps(mappings, ensure_ascii=False)
+                                    + "\n处理完成。"
+                                ),
+                            }
+                        ],
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 120,
+                    "output_tokens": 40,
+                    "total_tokens": 160,
+                },
+            },
+        )
+
+    provider = DeepSeekProvider(
+        "test-api-key",
+        transport=httpx.MockTransport(handler),
+    )
+    client = _configured_client(registry, provider)
+    response = await client.post(
+        "/translate",
+        json={
+            "source": "A15井采用定液生产制度，日产液控制在500方，井底流压不得低于80 bar。",
+            "source_system": "client_c",
+            "target_platform": "cmg",
+        },
+    )
+
+    assert response.status_code == 200
+    summary = response.json()["deepseek_trace"]
+    assert summary["api_requests"] == 1
+    assert summary["retry_requests"] == 0
+    assert summary["local_corrections"] == 1
+    assert summary["avoided_network_retries"] == 1
+    assert summary["input_tokens"] == 120
+    assert summary["output_tokens"] == 40
+    assert summary["total_tokens"] == 160
+    assert summary["duration_ms"] >= 0
+    assert summary["trace_url"].startswith("/deepseek-traces/")
+    assert summary["readable_log_url"].endswith("/readable")
+    trace_response = await client.get(summary["trace_url"])
+    assert trace_response.status_code == 200
+    trace = trace_response.json()
+    assert trace["translation_id"] == response.json()["translation_id"]
+    assert trace["calls"][0]["source_block_id"] == "block_0001"
+    assert trace["calls"][0]["call_reason"] == "initial"
+    assert trace["calls"][0]["outcome"] == "accepted_after_local_correction"
+    assert trace["calls"][0]["local_correction"] == "json_extracted_from_wrapper"
+    assert trace["calls"][0]["avoided_network_retry"] is True
+    assert trace["calls"][0]["request_payload"]["input"]
+    assert trace["calls"][0]["response_payload"]["output"]
+    assert "Authorization" not in trace["calls"][0]["request_payload"]
+    assert (tmp_path / "deepseek-traces" / f'{trace["translation_id"]}.json').is_file()
+    readable_response = await client.get(summary["readable_log_url"])
+    assert readable_response.status_code == 200
+    assert readable_response.headers["content-type"].startswith("text/plain")
+    assert "Call 1" in readable_response.text
+    assert "Block: block_0001" in readable_response.text
+    assert "Request input:" in readable_response.text
+    assert "\\" not in readable_response.text
+    assert (
+        tmp_path / "deepseek-traces" / f'{trace["translation_id"]}.readable.log'
+    ).is_file()
     await client.aclose()
 
 

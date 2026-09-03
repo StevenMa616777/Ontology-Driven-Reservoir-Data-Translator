@@ -19,6 +19,11 @@
 body { margin: 0; min-width: 320px; background: var(--paper); }
 button, textarea, select { font: inherit; }
 
+/* The readability preference scales the complete application, including content
+   rendered after a translation finishes. Component-level rules below provide an
+   additional floor for especially small logs and metadata. */
+.readable-text body { zoom: 1.1; }
+
 .topbar {
   height: 76px;
   padding: 0 clamp(20px, 5vw, 72px);
@@ -35,6 +40,12 @@ button, textarea, select { font: inherit; }
 .brand strong { font-size: 14px; letter-spacing: .01em; }
 .brand small { margin-top: 2px; color: var(--muted); font-size: 11px; }
 .system-badges { display: flex; gap: 8px; }
+.product-nav { display: flex; align-items: center; gap: 4px; margin-right: 12px; }
+.product-nav a { padding: 8px 10px; color: var(--muted); border-bottom: 2px solid transparent; text-decoration: none; font-size: 11px; font-weight: 700; }
+.product-nav a:hover, .product-nav a.is-active { color: var(--green); border-bottom-color: var(--green); }
+.readability-toggle { min-height: 34px; padding: 0 11px; border: 1px solid var(--line); color: var(--green-dark); background: var(--surface); cursor: pointer; font-size: 12px; font-weight: 750; white-space: nowrap; }
+.readability-toggle:hover, .readability-toggle[aria-pressed="true"] { border-color: var(--green); background: #e8f0df; }
+.readability-toggle span { margin-right: 2px; font-family: Georgia, serif; font-size: 15px; }
 .badge { padding: 7px 10px; border-radius: 100px; font-size: 11px; font-weight: 700; letter-spacing: .04em; }
 .badge-neutral { border: 1px solid var(--line); }
 .badge-success { color: var(--green); background: #ddefd8; }
@@ -190,6 +201,31 @@ select { width: 100%; height: 45px; padding: 0 12px; border: 1px solid var(--lin
 .validation-card li span { grid-column: 1 / -1; color: var(--muted); line-height: 1.5; }
 .no-issues { margin: 14px 0 0; color: var(--muted); font-size: 11px; }
 .target-disclaimer { margin: 14px 0 0; padding-left: 12px; border-left: 2px solid var(--warning); color: var(--muted); font-size: 10px; line-height: 1.65; }
+.deepseek-trace-section { padding: 28px clamp(22px, 3vw, 38px); border-top: 1px solid var(--line); background: #f8f7f1; }
+.deepseek-trace-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.deepseek-trace-heading h2 { margin: 7px 0 0; font: 500 22px/1.2 Georgia, "Songti SC", serif; }
+.trace-toggle { flex: 0 0 auto; margin: 0; }
+.trace-summary-grid { display: grid; grid-template-columns: repeat(7, minmax(110px, 1fr)); gap: 1px; margin-top: 18px; background: var(--line); border: 1px solid var(--line); }
+.trace-summary-grid span { padding: 13px; background: var(--surface); color: var(--muted); font-size: 10px; }
+.trace-summary-grid b { display: block; margin-bottom: 5px; color: var(--ink); font: 700 17px/1 ui-monospace, monospace; }
+#deepseek-trace-detail { margin-top: 18px; }
+.trace-file-meta, .trace-loading, .trace-load-error { color: var(--muted); font-size: 10px; }
+.trace-load-error { color: var(--danger); }
+.trace-table-wrap { margin-top: 10px; overflow-x: auto; border: 1px solid var(--line); background: white; }
+.deepseek-trace-table { width: 100%; min-width: 1040px; border-collapse: collapse; font-size: 10px; }
+.deepseek-trace-table th, .deepseek-trace-table td { padding: 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; white-space: nowrap; }
+.deepseek-trace-table th { color: var(--muted); background: #eef0ea; text-transform: uppercase; letter-spacing: .05em; }
+.deepseek-trace-table td > strong, .deepseek-trace-table td > small { display: block; }
+.trace-call-error { margin-top: 4px; color: var(--danger); }
+.deepseek-trace-table details summary { color: var(--green); cursor: pointer; font-weight: 700; }
+.trace-call-repair { display: block; margin-top: 4px; color: var(--green); }
+.readable-trace-log { margin-top: 16px; border: 1px solid var(--line); background: var(--surface); }
+.readable-trace-log summary { padding: 12px 14px; color: var(--green); cursor: pointer; font-weight: 700; }
+.readable-trace-log pre { max-height: 520px; margin: 0; padding: 16px; overflow: auto; border-top: 1px solid var(--line); white-space: pre-wrap; word-break: break-word; }
+.trace-reason { padding: 3px 6px; color: var(--green-dark); background: #ddefd8; font: 700 9px/1 ui-monospace, monospace; }
+.trace-payloads { width: min(900px, 75vw); display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; white-space: normal; }
+.trace-payloads h4 { margin: 0 0 6px; font-size: 10px; }
+.trace-payloads pre { max-height: 420px; margin: 0; padding: 12px; overflow: auto; background: #102a25; color: #dbe8e3; font: 9px/1.55 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .trace-section { padding: 28px clamp(22px, 3vw, 38px); border-top: 1px solid var(--line); background: #eef0ea; }
 .trace-section ol { display: flex; gap: 0; margin: 18px 0 0; padding: 0; overflow-x: auto; list-style: none; }
 .trace-section li { min-width: 150px; display: grid; grid-template-columns: auto 1fr; gap: 8px; padding: 10px 16px 10px 0; position: relative; }
@@ -209,9 +245,59 @@ select { width: 100%; height: 45px; padding: 0 12px; border: 1px solid var(--lin
 .error-mark { color: white; background: var(--danger); font-weight: 800; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* Readable defaults: supporting content should remain legible on high-DPI screens. */
+.brand small, .product-nav a, .badge, .panel-note, .file-summary small,
+.file-summary .file-open-hint, .or-divider, .run-panel legend, .field-label,
+.button-secondary, .result-metrics > span:not(.status-pill), .stage-meta,
+.source-block summary span, .mapping-kicker, .mapping-source small,
+.mapping-target small, .mapping-target code, .status-pill, .review-item > span:first-child,
+.review-item p, .session-note, .text-button, .validation-title,
+.validation-title strong, .validation-counts, .validation-card li, .no-issues,
+.target-disclaimer, .trace-summary-grid span, .trace-file-meta, .trace-loading,
+.trace-load-error, .deepseek-trace-table, .trace-reason, .trace-payloads h4,
+.trace-section li > span, .trace-section li strong, .trace-section li small,
+.trace-section li > b { font-size: max(11px, 0.72rem); }
+.source-block pre, .code-window, .trace-payloads pre, .readable-trace-log pre {
+  font-size: 13px;
+  line-height: 1.72;
+}
+.safety-note, .review-banner p, .review-pass p, .no-issues, .target-disclaimer {
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.readable-text .hero-copy, .readable-text textarea, .readable-text select,
+.readable-text .drop-prompt > span:not(.drop-icon), .readable-text .safety-note,
+.readable-text .empty-state p, .readable-text .review-banner p,
+.readable-text .review-pass p, .readable-text .review-item p,
+.readable-text .no-issues, .readable-text .target-disclaimer { font-size: 15px; }
+.readable-text .brand small, .readable-text .product-nav a, .readable-text .badge,
+.readable-text .panel-note, .readable-text .field-label, .readable-text .stage-meta,
+.readable-text .mapping-kicker, .readable-text .mapping-source small,
+.readable-text .mapping-target small, .readable-text .mapping-target code,
+.readable-text .status-pill, .readable-text .session-note,
+.readable-text .text-button, .readable-text .validation-title,
+.readable-text .validation-title strong, .readable-text .validation-counts,
+.readable-text .validation-card li, .readable-text .trace-summary-grid span,
+.readable-text .trace-file-meta, .readable-text .trace-loading,
+.readable-text .trace-load-error, .readable-text .deepseek-trace-table,
+.readable-text .trace-reason, .readable-text .trace-payloads h4,
+.readable-text .trace-section li > span, .readable-text .trace-section li strong,
+.readable-text .trace-section li small, .readable-text .trace-section li > b { font-size: 13px; }
+.readable-text .source-block pre, .readable-text .code-window,
+.readable-text .trace-payloads pre, .readable-text .readable-trace-log pre {
+  font-size: 15px;
+  line-height: 1.8;
+}
+
 @media (max-width: 780px) {
   .topbar { height: auto; min-height: 68px; padding: 12px 20px; }
   .system-badges .badge-success { display: none; }
+  .system-badges .badge { display: none; }
+  .readability-toggle { padding-inline: 8px; font-size: 0; }
+  .readability-toggle span { margin: 0; font-size: 15px; }
+  .product-nav { margin-right: 0; }
+  .product-nav a { padding-inline: 6px; font-size: 10px; }
   main { width: min(100% - 24px, 1440px); }
   .hero { padding: 44px 0 30px; }
   .workspace-grid { grid-template-columns: 1fr; }
@@ -225,4 +311,7 @@ select { width: 100%; height: 45px; padding: 0 12px; border: 1px solid var(--lin
   .validation-grid { grid-template-columns: 1fr; }
   .source-block summary { grid-template-columns: 1fr auto; }
   .source-block summary small { grid-column: 1 / -1; }
+  .deepseek-trace-heading { align-items: flex-start; flex-direction: column; }
+  .trace-summary-grid { grid-template-columns: 1fr 1fr; }
+  .trace-payloads { grid-template-columns: 1fr; }
 }

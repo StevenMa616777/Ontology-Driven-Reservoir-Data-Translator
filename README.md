@@ -83,6 +83,10 @@ python3 -m venv .venv
 浏览器打开 `http://127.0.0.1:8000/`。在没有 Provider 凭据时，确定性 endpoint
 仍可使用，语义转换 endpoint 会明确返回 `SEMANTIC_PROVIDER_NOT_CONFIGURED`。
 
+真实转换会把逐次 DeepSeek 请求、Token、Prompt 和响应审计写入被 Git 忽略的
+`artifacts/deepseek_traces/`，并可在结果页按按钮展开。该目录包含客户原始内容，
+不可提交或直接分享；可用 `DEEPSEEK_TRACE_DIR` 改到项目外的受控目录。
+
 DeepSeek 凭据建议通过环境变量提供：
 
 ```bash

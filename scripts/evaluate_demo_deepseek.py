@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from dataclasses import asdict
 from datetime import UTC, datetime
 import hashlib
 import json
@@ -87,7 +86,7 @@ async def run(
     )
     _write_json(
         output_dir / "provider_trace.json",
-        [asdict(trace) for trace in traces],
+        [trace.model_dump(mode="json") for trace in traces],
     )
 
     canonical = CanonicalBuilder(registry).build(semantic_batch.mapped)
@@ -115,7 +114,7 @@ async def run(
         )
 
     elapsed_seconds = round(time.perf_counter() - started, 3)
-    trace_payload = [asdict(trace) for trace in traces]
+    trace_payload = [trace.model_dump(mode="json") for trace in traces]
     total_tokens = sum(trace.total_tokens or 0 for trace in traces)
     response_models = sorted(
         {trace.response_model for trace in traces if trace.response_model is not None}
@@ -160,7 +159,8 @@ async def run(
         "elapsed_seconds": elapsed_seconds,
         "security": {
             "credential_recorded": False,
-            "prompts_recorded": False,
+            "prompts_recorded": True,
+            "responses_recorded": True,
         },
     }
 

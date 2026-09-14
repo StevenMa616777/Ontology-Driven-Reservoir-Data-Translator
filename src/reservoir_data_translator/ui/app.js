@@ -303,7 +303,7 @@ function renderDeepSeekTraceShell(summary) {
   if (!summary) return "";
   return `<section class="deepseek-trace-section">
     <div class="deepseek-trace-heading">
-      <div><p class="step-label">DEEPSEEK API TRACE</p><h2>模型调用与 Token 明细</h2></div>
+      <div><p class="step-label">DEEPSEEK API TRACE</p><h2>模型调用与 Token 明细 <small class="trace-ui-version">BLOCK DIAGNOSTICS V2</small></h2></div>
       <button class="button button-secondary trace-toggle" type="button" data-toggle="deepseek-trace">显示调用明细</button>
     </div>
     <div class="trace-summary-grid">
@@ -319,22 +319,289 @@ function renderDeepSeekTraceShell(summary) {
   </section>`;
 }
 
+function responseOutputText(responsePayload) {
+  if (!responsePayload || typeof responsePayload !== "object") return "";
+  const parts = [];
+  for (const item of responsePayload.output || []) {
+    for (const content of item?.content || []) {
+      if (content?.type === "output_text" && typeof content.text === "string") parts.push(content.text);
+    }
+  }
+  return parts.join("\n");
+}
+
+function parsedResponseOutput(call) {
+  const outputText = responseOutputText(call.response_payload);
+  if (!outputText) return { outputText: "", value: null };
+  try {
+    return { outputText, value: JSON.parse(outputText) };
+  } catch {
+    return { outputText, value: null };
+  }
+}
+
+function parsedPrompt(call) {
+  const prompt = call.request_payload?.input || "";
+  const marker = "\nINPUT:\n";
+  const correctionMarker = "\nCORRECTION REQUIRED:\n";
+  const markerIndex = prompt.indexOf(marker);
+  if (markerIndex < 0) return { system: prompt, input: null, correction: null };
+  const system = prompt.slice(0, markerIndex);
+  const remainder = prompt.slice(markerIndex + marker.length);
+  const correctionIndex = remainder.indexOf(correctionMarker);
+  const inputText = correctionIndex < 0 ? remainder : remainder.slice(0, correctionIndex);
+  const correctionText = correctionIndex < 0 ? "" : remainder.slice(correctionIndex + correctionMarker.length);
+  try {
+    return {
+      system,
+      input: JSON.parse(inputText),
+      correction: correctionText ? JSON.parse(correctionText) : null,
+    };
+  } catch {
+    return { system, input: null, correction: correctionText || null };
+  }
+}
+
+function groupDeepSeekCalls(calls) {
+  const groups = new Map();
+  calls.forEach((call, index) => {
+    const blockId = call.source_block_id || "未识别 Block";
+    if (!groups.has(blockId)) groups.set(blockId, []);
+    groups.get(blockId).push({ ...call, trace_index: index });
+  });
+  return [...groups.entries()].map(([blockId, blockCalls]) => ({ blockId, calls: blockCalls }));
+}
+
+function groupTraceCallChains(calls) {
+  const chains = new Map();
+  let inferredChain = null;
+  calls.forEach((call, index) => {
+    if (call.attempt_group_id) inferredChain = call.attempt_group_id;
+    else if (call.call_reason === "initial" || inferredChain === null) inferredChain = `legacy-${index}`;
+    const chainId = call.attempt_group_id || inferredChain;
+    if (!chains.has(chainId)) chains.set(chainId, []);
+    chains.get(chainId).push(call);
+  });
+  return [...chains.values()];
+}
+
+function traceOutcomeTone(call) {
+  if (call.error_code || ["output_invalid", "contract_invalid", "http_error", "network_error"].includes(call.outcome)) return "error";
+  if (call.local_correction) return "warning";
+  return "success";
+}
+
+function traceOutcomeLabel(call) {
+  const labels = {
+    accepted: "通过",
+    accepted_after_local_correction: "本地更正后通过",
+    output_invalid: "输出无效",
+    contract_invalid: "业务契约无效",
+    http_error: "HTTP 错误",
+    network_error: "网络错误",
+    accepted_pending_validation: "等待验证",
+  };
+  return labels[call.outcome] || call.outcome || call.status || "未知";
+}
+
+function renderTraceError(call) {
+  if (!call.error_code && !call.error_message) return "";
+  const fields = (call.error_details || []).map((detail) => {
+    const location = Array.isArray(detail.location) ? detail.location.join(".") : detail.location || detail.path;
+    const input = detail.input === undefined ? "" : `<small>错误值：${escapeHtml(typeof detail.input === "object" ? JSON.stringify(detail.input) : detail.input)}</small>`;
+    return `<li><button type="button" data-trace-error-path="${escapeHtml(location || "<root>")}">${escapeHtml(location || "<root>")}</button><span>${escapeHtml(detail.message || detail.type)}<code>${escapeHtml(detail.type || "")}</code>${input}</span></li>`;
+  }).join("");
+  return `<div class="trace-error-panel" role="alert">
+    <div><span>异常</span><strong>${escapeHtml(call.error_code || "API_CALL_FAILED")}</strong></div>
+    <p>${escapeHtml(call.error_message || "本次调用未通过验证。")}</p>
+    ${fields ? `<ul>${fields}</ul>` : ""}
+  </div>`;
+}
+
+function traceArrayIdentity(item) {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+  const field = ["canonical_path", "concept_id", "block_id", "id"]
+    .find((candidate) => typeof item[candidate] === "string" && item[candidate]);
+  return field ? `${field}=${item[field]}` : null;
+}
+
+function collectTraceDiffs(before, after, path = "$", changes = []) {
+  if (before === undefined || after === undefined) {
+    changes.push({ path, before, after });
+    return changes;
+  }
+  if (before === null || after === null || typeof before !== "object" || typeof after !== "object") {
+    if (JSON.stringify(before) !== JSON.stringify(after)) changes.push({ path, before, after });
+    return changes;
+  }
+  if (Array.isArray(before) && Array.isArray(after)) {
+    const beforeIds = before.map(traceArrayIdentity);
+    const afterIds = after.map(traceArrayIdentity);
+    const identitiesAreStable = [...beforeIds, ...afterIds].every(Boolean)
+      && new Set(beforeIds).size === beforeIds.length
+      && new Set(afterIds).size === afterIds.length;
+    if (identitiesAreStable) {
+      const beforeMap = new Map(beforeIds.map((identity, index) => [identity, before[index]]));
+      const afterMap = new Map(afterIds.map((identity, index) => [identity, after[index]]));
+      [...new Set([...beforeIds, ...afterIds])].forEach((identity) => {
+        collectTraceDiffs(beforeMap.get(identity), afterMap.get(identity), `${path}[${identity}]`, changes);
+      });
+    } else {
+      const length = Math.max(before.length, after.length);
+      for (let index = 0; index < length; index += 1) collectTraceDiffs(before[index], after[index], `${path}[${index}]`, changes);
+    }
+    return changes;
+  }
+  if (Array.isArray(before) !== Array.isArray(after)) {
+    changes.push({ path, before, after });
+    return changes;
+  }
+  [...new Set([...Object.keys(before), ...Object.keys(after)])].forEach((key) => {
+    collectTraceDiffs(before[key], after[key], `${path}.${key}`, changes);
+  });
+  return changes;
+}
+
+function renderTraceDiff(calls) {
+  if (calls.length < 2) return "";
+  const beforeCall = calls.find((call) => traceOutcomeTone(call) === "error") || calls[0];
+  const beforeIndex = calls.indexOf(beforeCall);
+  const afterCall = calls.slice(beforeIndex + 1).find((call) => traceOutcomeTone(call) !== "error") || calls.at(-1);
+  if (beforeCall === afterCall) return "";
+  const beforeOutput = parsedResponseOutput(beforeCall).value;
+  const afterOutput = parsedResponseOutput(afterCall).value;
+  if (beforeOutput === null || afterOutput === null) {
+    return `<section class="trace-diff-panel"><h4>重试结果对比</h4><p>至少一次输出不是可解析的 JSON，无法生成字段级差异；可在下方展开对应尝试查看原始输出。</p></section>`;
+  }
+  const allChanges = collectTraceDiffs(beforeOutput, afterOutput);
+  const supplementaryEvidence = allChanges.filter((change) => change.path.endsWith(".source_text") && change.before === undefined).length;
+  const changes = allChanges.filter((change) => !(change.path.endsWith(".source_text") && change.before === undefined)).slice(0, 40);
+  const displayValue = (value) => value === undefined ? "∅" : JSON.stringify(value);
+  const rows = changes.map((change) => {
+    const tone = change.before === undefined ? "added" : change.after === undefined ? "removed" : "changed";
+    return `<li class="trace-diff-${tone}"><code>${escapeHtml(change.path)}</code><span>${escapeHtml(displayValue(change.before))}</span><b>→</b><span>${escapeHtml(displayValue(change.after))}</span></li>`;
+  }).join("");
+  return `<section class="trace-diff-panel"><h4>失败尝试 → 后续结果的字段差异</h4>
+    ${supplementaryEvidence ? `<p class="trace-diff-note">另有 ${supplementaryEvidence} 项映射在重试后补充了 source_text，已折叠以突出契约变化。</p>` : ""}
+    ${rows ? `<ul>${rows}</ul>${allChanges.length - supplementaryEvidence > 40 ? "<p>仅显示前 40 项主要差异。</p>" : ""}` : "<p>两次调用的结构化输出没有其他字段级差异。</p>"}
+  </section>`;
+}
+
+function renderPromptSemanticView(call) {
+  const prompt = parsedPrompt(call);
+  if (!prompt.input) {
+    return `<p class="trace-prompt-unparsed">Prompt 不是可分区格式，请在“完整 System Prompt / Input”中查看。</p>`;
+  }
+  const rawBlock = prompt.input.raw_block || {};
+  const rawContent = typeof rawBlock.content === "string"
+    ? rawBlock.content
+    : JSON.stringify(rawBlock.content, null, 2);
+  const candidates = (prompt.input.ontology_candidates || []).map((candidate) => `
+    <li><strong>${escapeHtml(candidate.concept_id)}</strong><code>${escapeHtml(candidate.canonical_path_template)}</code><small>${escapeHtml(candidate.description || "")}</small></li>`).join("");
+  return `<div class="trace-semantic-grid">
+    <section><h5>映射范围</h5><dl><dt>证据 Block</dt><dd><code>${escapeHtml(prompt.input.mapping_scope?.source_block_id || rawBlock.block_id)}</code></dd><dt>规则</dt><dd>${escapeHtml(prompt.input.mapping_scope?.instruction || "仅映射当前 raw_block")}</dd></dl></section>
+    <section><h5>原始证据</h5><pre>${escapeHtml(rawContent || "无内容")}</pre></section>
+    <section class="trace-candidates"><h5>Ontology Candidates · ${(prompt.input.ontology_candidates || []).length}</h5><ul>${candidates || "<li>无候选概念</li>"}</ul></section>
+    ${prompt.correction ? `<section class="trace-correction-instruction"><h5>CORRECTION REQUIRED</h5><pre>${escapeHtml(JSON.stringify(prompt.correction, null, 2))}</pre></section>` : ""}
+    <details><summary>完整 System Prompt</summary><pre>${escapeHtml(prompt.system || "未提供。")}</pre></details>
+    <details><summary>完整 Canonical Schema</summary><pre>${escapeHtml(JSON.stringify(prompt.input.canonical_schema || {}, null, 2))}</pre></details>
+  </div>`;
+}
+
+function renderTraceCode(value) {
+  return String(value || "").split("\n").map((line) => `<span class="trace-json-line">${escapeHtml(line || " ")}</span>`).join("");
+}
+
+function renderTraceAttempt(call, attemptNumber, previousCall = null) {
+  const tone = traceOutcomeTone(call);
+  const parsed = parsedResponseOutput(call);
+  const formattedOutput = parsed.value === null ? parsed.outputText : JSON.stringify(parsed.value, null, 2);
+  const requestInput = call.request_payload?.input || "";
+  const requestInstructions = call.request_payload?.instructions || "";
+  const inputState = !previousCall
+    ? "初始输入"
+    : previousCall.request_payload?.input === requestInput
+      ? "输入未变化"
+      : call.call_reason === "contract_retry" ? "追加纠正指令" : "输入发生变化";
+  const validatedOutput = call.validated_output ? JSON.stringify(call.validated_output, null, 2) : "";
+  return `<article class="trace-attempt trace-attempt-${tone}">
+    <header class="trace-attempt-header">
+      <span class="trace-attempt-number">尝试 ${attemptNumber}</span>
+      <span class="trace-reason">${escapeHtml(call.call_reason)}</span>
+      <strong class="trace-status trace-status-${tone}">${escapeHtml(traceOutcomeLabel(call))}</strong>
+      <span class="trace-input-state">${escapeHtml(inputState)}</span>
+      <span>${escapeHtml(call.input_tokens ?? "—")} in / ${escapeHtml(call.output_tokens ?? "—")} out</span>
+      <span>${Number(call.duration_ms || 0).toFixed(0)} ms</span>
+    </header>
+    ${renderTraceError(call)}
+    ${call.local_correction ? `<p class="trace-correction"><strong>本地更正</strong>${escapeHtml(call.local_correction)}</p>` : ""}
+    <div class="trace-attempt-content">
+      <section><div class="trace-pane-heading"><h4>API 输出</h4><button type="button" data-trace-copy="output" data-trace-index="${call.trace_index}">复制输出</button></div><pre>${renderTraceCode(formattedOutput || "未返回 output_text。")}</pre></section>
+      ${call.local_correction && validatedOutput ? `<section class="trace-normalized-output"><div class="trace-pane-heading"><h4>本地修正后的有效 JSON</h4><button type="button" data-trace-copy="validated" data-trace-index="${call.trace_index}">复制修正结果</button></div><pre>${renderTraceCode(validatedOutput)}</pre></section>` : ""}
+      <details class="trace-semantic-prompt"><summary>语义视图：证据、候选与纠正指令</summary>${renderPromptSemanticView(call)}</details>
+      <details><summary>完整 Prompt / Input</summary><div class="trace-prompt-sections"><h5>Request Instructions</h5><pre>${escapeHtml(requestInstructions || "未提供。")}</pre><h5>Input</h5><pre>${escapeHtml(requestInput || "未提供。")}</pre></div></details>
+      <details><summary>原始 Request / Response</summary><div class="trace-payloads"><div><h4>Request</h4><pre>${escapeHtml(JSON.stringify(call.request_payload, null, 2))}</pre></div><div><h4>Response</h4><pre>${escapeHtml(JSON.stringify(call.response_payload, null, 2))}</pre></div></div></details>
+    </div>
+  </article>`;
+}
+
+function renderTraceBlockGroup(group) {
+  const calls = group.calls;
+  const finalCall = calls.at(-1);
+  const hasProblem = calls.some((call) => traceOutcomeTone(call) === "error");
+  const finalTone = traceOutcomeTone(finalCall);
+  const totalTokens = calls.reduce((sum, call) => sum + Number(call.total_tokens || 0), 0);
+  const duration = calls.reduce((sum, call) => sum + Number(call.duration_ms || 0), 0);
+  const retryTokens = calls.slice(1).reduce((sum, call) => sum + Number(call.total_tokens || 0), 0);
+  const retryDuration = calls.slice(1).reduce((sum, call) => sum + Number(call.duration_ms || 0), 0);
+  const route = calls.map((call) => traceOutcomeLabel(call)).join(" → ");
+  const errors = calls.filter((call) => call.error_code);
+  const chains = groupTraceCallChains(calls);
+  return `<details class="trace-block-group trace-block-${hasProblem ? "recovered" : finalTone}" data-trace-block="${escapeHtml(group.blockId)}" data-has-problem="${hasProblem || calls.length > 1}" ${hasProblem ? "open" : ""}>
+    <summary class="trace-block-summary">
+      <span><small>BLOCK</small><code>${escapeHtml(group.blockId)}</code></span>
+      <span><small>调用过程</small><strong>${escapeHtml(route)}</strong></span>
+      <span><small>API 请求</small><strong>${calls.length}</strong></span>
+      <span><small>总 Token</small><strong>${totalTokens}</strong></span>
+      <span><small>总耗时</small><strong>${duration.toFixed(0)} ms</strong></span>
+      <span class="trace-final-status trace-status-${finalTone}"><small>最终状态</small><strong>${escapeHtml(traceOutcomeLabel(finalCall))}</strong></span>
+    </summary>
+    <div class="trace-block-detail">
+      <div class="trace-block-tools"><span>${calls.length > 1 ? `重试额外消耗 ${retryTokens} tokens / ${retryDuration.toFixed(0)} ms` : "本组没有重试成本"}</span><button type="button" data-trace-copy="diagnosis" data-trace-block-id="${escapeHtml(group.blockId)}">复制诊断摘要</button></div>
+      ${errors.length ? `<div class="trace-block-diagnosis"><strong>本组发生 ${errors.length} 次异常</strong><span>${errors.map((call) => `${call.error_code}: ${call.error_message || "无异常描述"}`).map(escapeHtml).join("；")}</span></div>` : ""}
+      ${chains.map((chain) => renderTraceDiff(chain)).join("")}
+      <div class="trace-attempt-list">${calls.map((call, index) => renderTraceAttempt(call, index + 1, calls[index - 1])).join("")}</div>
+    </div>
+  </details>`;
+}
+
+function traceDiagnosisText(group) {
+  const calls = group.calls;
+  const first = calls[0] || {};
+  const finalCall = calls.at(-1) || {};
+  const errors = calls.filter((call) => call.error_code);
+  const locations = errors.flatMap((call) => call.error_details || []).map((detail) => {
+    const location = Array.isArray(detail.location) ? detail.location.join(".") : detail.location || detail.path;
+    return `${location || "<root>"} (${detail.type || "validation_error"})`;
+  });
+  const retryTokens = calls.slice(1).reduce((sum, call) => sum + Number(call.total_tokens || 0), 0);
+  const retryDuration = calls.slice(1).reduce((sum, call) => sum + Number(call.duration_ms || 0), 0);
+  return [
+    `Block: ${group.blockId}`,
+    `Initial: ${first.call_reason || "initial"} / ${first.outcome || first.status || "unknown"}`,
+    ...errors.map((call) => `Error: ${call.error_code} — ${call.error_message || "无异常描述"}`),
+    ...(locations.length ? [`Location: ${locations.join(", ")}`] : []),
+    `Final: ${finalCall.call_reason || "unknown"} / ${finalCall.outcome || finalCall.status || "unknown"}`,
+    `Retry cost: ${retryTokens} tokens / ${retryDuration.toFixed(0)} ms`,
+  ].join("\n");
+}
+
 function renderDeepSeekTraceDetail(trace, readableLog) {
   const calls = trace.calls || [];
-  const rows = calls.map((call, index) => `<tr>
-    <td>${index + 1}</td>
-    <td><code>${escapeHtml(call.source_block_id || "—")}</code></td>
-    <td><span class="trace-reason">${escapeHtml(call.call_reason)}</span></td>
-    <td title="输出格式或 Schema 重试 / HTTP 网络传输重试">${call.logical_attempt} / ${call.transport_attempt}</td>
-    <td>${escapeHtml(call.input_tokens ?? "—")}</td>
-    <td>${escapeHtml(call.output_tokens ?? "—")}</td>
-    <td><b>${escapeHtml(call.total_tokens ?? "—")}</b></td>
-    <td>${Number(call.duration_ms || 0).toFixed(0)} ms</td>
-    <td><strong>${escapeHtml(call.outcome)}</strong>${call.local_correction ? `<small class="trace-call-repair">本地更正：${escapeHtml(call.local_correction)}</small>` : ""}${call.error_code ? `<small class="trace-call-error">${escapeHtml(call.error_code)}</small>` : ""}</td>
-    <td><details><summary>查看</summary><div class="trace-payloads"><div><h4>发送给 API 的 Prompt / Request</h4><pre>${escapeHtml(JSON.stringify(call.request_payload, null, 2))}</pre></div><div><h4>API 返回内容</h4><pre>${escapeHtml(JSON.stringify(call.response_payload, null, 2))}</pre></div></div></details></td>
-  </tr>`).join("");
+  const groups = groupDeepSeekCalls(calls);
   return `<div class="trace-file-meta">文件：${escapeHtml(trace.source?.file_name)} · 状态：${escapeHtml(trace.semantic_status)} · ${escapeHtml(trace.created_at)}</div>
-    <div class="trace-table-wrap"><table class="deepseek-trace-table"><thead><tr><th>#</th><th>Block</th><th>调用原因</th><th title="左侧为输出尝试，右侧为网络尝试">输出尝试 / 网络尝试</th><th>输入</th><th>输出</th><th>总 Token</th><th>耗时</th><th>状态</th><th>内容</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="trace-filters" role="group" aria-label="Trace 过滤"><button class="is-active" type="button" data-trace-filter="all">全部 Block</button><button type="button" data-trace-filter="problems">只看错误 / 重试</button></div>
+    <div class="trace-block-list">${groups.map(renderTraceBlockGroup).join("") || '<p class="trace-loading">Trace 中没有 API 调用记录。</p>'}</div>
     <details class="readable-trace-log"><summary>查看去除转义与特殊字符的易读日志</summary><pre>${escapeHtml(readableLog || "易读日志未生成。")}</pre></details>`;
 }
 
@@ -458,6 +725,57 @@ async function copyWithFeedback(button, content) {
   setTimeout(() => { button.textContent = original; }, 1400);
 }
 
+function wireDeepSeekTraceDetail(detail, trace) {
+  detail.querySelectorAll("[data-trace-copy]").forEach((copyButton) => {
+    copyButton.addEventListener("click", (copyEvent) => {
+      const action = copyEvent.currentTarget.dataset.traceCopy;
+      const blockId = copyEvent.currentTarget.dataset.traceBlockId;
+      const call = trace.calls?.[Number(copyEvent.currentTarget.dataset.traceIndex)];
+      const group = groupDeepSeekCalls(trace.calls || []).find((item) => item.blockId === blockId);
+      if (action === "diagnosis" && !group) return;
+      if (action !== "diagnosis" && !call) return;
+      const content = action === "diagnosis"
+        ? traceDiagnosisText(group)
+        : action === "validated"
+          ? JSON.stringify(call.validated_output, null, 2)
+          : responseOutputText(call.response_payload);
+      copyWithFeedback(copyEvent.currentTarget, content);
+    });
+  });
+  detail.querySelectorAll("[data-trace-filter]").forEach((filterButton) => {
+    filterButton.addEventListener("click", (filterEvent) => {
+      const filter = filterEvent.currentTarget.dataset.traceFilter;
+      detail.querySelectorAll("[data-trace-filter]").forEach((item) => item.classList.toggle("is-active", item === filterEvent.currentTarget));
+      detail.querySelectorAll(".trace-block-group").forEach((groupElement) => {
+        groupElement.hidden = filter === "problems" && groupElement.dataset.hasProblem !== "true";
+      });
+    });
+  });
+  detail.querySelectorAll("[data-trace-error-path]").forEach((pathButton) => {
+    pathButton.addEventListener("click", (pathEvent) => {
+      const attempt = pathEvent.currentTarget.closest(".trace-attempt");
+      const output = attempt?.querySelector(".trace-attempt-content > section pre");
+      if (!output) return;
+      const path = pathEvent.currentTarget.dataset.traceErrorPath || "";
+      const parts = path.split(/[.\[\]]/).filter((part) => part && !/^\d+$/.test(part) && !["MAPPED", "UNMAPPED", "AMBIGUOUS"].includes(part));
+      const field = parts.at(-1);
+      const lines = [...output.querySelectorAll(".trace-json-line")];
+      const mappingIndex = path.match(/(?:^|\.)mappings\.(\d+)(?:\.|$)/)?.[1];
+      const mappingStarts = lines
+        .map((line, index) => line.textContent === "    {" ? index : -1)
+        .filter((index) => index >= 0);
+      const rangeStart = mappingIndex === undefined ? 0 : mappingStarts[Number(mappingIndex)] ?? 0;
+      const rangeEnd = mappingIndex === undefined ? lines.length : mappingStarts[Number(mappingIndex) + 1] ?? lines.length;
+      const targetLine = lines.slice(rangeStart, rangeEnd).find((line) => line.textContent.includes(`"${field}"`))
+        || lines.find((line) => line.textContent.includes(`"${field}"`))
+        || lines[0];
+      output.querySelectorAll(".trace-output-focus").forEach((line) => line.classList.remove("trace-output-focus"));
+      targetLine?.scrollIntoView({ behavior: "smooth", block: "center" });
+      requestAnimationFrame(() => targetLine?.classList.add("trace-output-focus"));
+    });
+  });
+}
+
 function wireResultActions() {
   const reviewChecks = [...document.querySelectorAll("[data-review-index]")];
   const reviewButton = document.querySelector("#review-continue");
@@ -486,6 +804,7 @@ function wireResultActions() {
       ]);
       detail.innerHTML = renderDeepSeekTraceDetail(trace, readableLog);
       detail.dataset.loaded = "true";
+      wireDeepSeekTraceDetail(detail, trace);
     } catch (error) {
       detail.innerHTML = `<p class="trace-load-error">${escapeHtml(error.message || "Trace 读取失败。")}</p>`;
     }

@@ -7,7 +7,6 @@ from pathlib import Path
 
 from .models import RawDocument
 
-
 class IngestionError(ValueError):
     """A source cannot be represented safely by the selected parser."""
 

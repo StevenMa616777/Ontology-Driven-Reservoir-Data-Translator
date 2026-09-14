@@ -37,9 +37,13 @@ from .models import (
     SourceRegion,
 )
 
-
+# 认为一个换行后接着至少一个换行为段落边界 两个换行之间可以有空格或制表符
 _PARAGRAPH_BOUNDARY = re.compile(r"\n[ \t]*\n+")
+
+# 以中英文的 [.!?。！？；;] 结尾后面可包含制表符或空格 作为分句依据
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?。！？；;])(?:[ \t]+|\n+)")
+
+# 一个汉字、1到4个ASCII字符、一个标点符号 粗略算成一个Token
 _TOKEN_ESTIMATE = re.compile(
     r"[\u3400-\u9fff]|[^\x00-\x7f\s]|[A-Za-z0-9_]{1,4}|[^\w\s]",
     re.UNICODE,
@@ -103,6 +107,9 @@ class PdfParser(DocumentParser):
         source_id: str | None = None,
     ) -> RawDocument:
         source_path = self._source_path(path)
+        # TODO: 延迟失败设计 Codex考虑了不同的 parser分服务包装给用户的情况
+        #  但实际上这里完全可以直接在 import阶段检查
+        #  所有的 parser本来就会被一起打包成工具
         if pdfplumber is None:
             raise IngestionError(
                 "PDF_DEPENDENCY_UNAVAILABLE",
@@ -121,6 +128,7 @@ class PdfParser(DocumentParser):
                         f"PDF has {len(pdf.pages)} pages; limit is {self.max_pages}.",
                         path=source_path,
                     )
+                # TODO: 这里发现 PDF的文本层无法提取似乎可以开始 OCR了
                 if not pdf.doc.is_extractable:
                     raise IngestionError(
                         "PDF_TEXT_EXTRACTION_NOT_ALLOWED",
@@ -129,8 +137,10 @@ class PdfParser(DocumentParser):
                     )
 
                 pending: list[_PendingBlock] = []
+                # 记录只包含图片的页码 如果无法解析出原生text 或者 图片主导由于未实现 OCR,报错
                 image_only_pages: list[int] = []
                 for page_number, page in enumerate(pdf.pages, start=1):
+                    # 解析返回 page 中拆解出的 blocks、是否能解析出 text、是否图片主导
                     page_blocks, has_native_text, image_dominates = self._parse_page(
                         page,
                         page_number,
@@ -544,6 +554,8 @@ class PdfParser(DocumentParser):
                 return index
         return None
 
+    # TODO: 这个方法拓展下去可能有助于实现 .PDF->.doc 的准确映射
+    #  就像一个把 PDF 转换为可编辑的文件的工具
     def _materialize_blocks(self, pending: list[_PendingBlock]) -> list[RawBlock]:
         blocks: list[RawBlock] = []
         ordered = sorted(pending, key=lambda block: (block.page, *block.sort_key))

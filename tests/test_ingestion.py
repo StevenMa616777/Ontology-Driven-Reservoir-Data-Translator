@@ -136,8 +136,8 @@ def test_parse_document_routes_supported_suffix_and_rejects_unknown(tmp_path) ->
     source.write_text("oil density", encoding="utf-8")
     assert parse_document(source).source_type == "txt"
 
-    unknown = tmp_path / "source.pdf"
-    unknown.write_bytes(b"not a PDF")
+    unknown = tmp_path / "source.docx"
+    unknown.write_bytes(b"not a DOCX")
     with pytest.raises(IngestionError) as error:
         parse_document(unknown)
     assert error.value.code == "UNSUPPORTED_SOURCE_TYPE"

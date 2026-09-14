@@ -1,6 +1,7 @@
 # Ontology-Driven Reservoir Data Translator
 
-面向油藏数值模拟资料的语义转换 PoC：把异构的 TXT、JSON、CSV、XLSX
+面向油藏数值模拟资料的语义转换 PoC：把异构的 TXT、JSON、CSV、XLSX、
+原生文本 PDF
 资料转换为统一的 Canonical Data Model，再由确定性程序生成 Eclipse/OPM
 INCLUDE 或 CMG Demo 片段。
 
@@ -25,7 +26,7 @@ INCLUDE 或 CMG Demo 片段。
 
 ```mermaid
 flowchart LR
-    A[TXT / JSON / CSV / XLSX] --> B[Ingestion<br/>RawDocument]
+    A[TXT / JSON / CSV / XLSX / native PDF] --> B[Ingestion<br/>RawDocument]
     B --> C[Ontology Retrieval]
     C --> D[LLM Semantic Mapping]
     D --> E{Review Gate}
@@ -57,7 +58,7 @@ flowchart LR
 
 | 能力 | 当前状态 |
 |---|---|
-| 输入 | TXT、JSON、CSV、XLSX；保留 block 级来源位置 |
+| 输入 | TXT、JSON、CSV、XLSX、原生文本 PDF；PDF 保留 page、bbox、阅读顺序和分块 span；OCR 不在当前范围 |
 | 语义层 | 外部 YAML Ontology、Source Mapping、受控检索、DeepSeek V4 Flash |
 | Canonical | Rock、Fluid/PVT、SCAL、Well/Control、Schedule |
 | 单位 | 压力、速率、黏度、密度、时间、压缩系数的受控换算 |
@@ -142,6 +143,7 @@ Eclipse INCLUDE → OPM 2025.10 Parser → Golden 语义比较，并把不含密
 
 ## 文档导航
 
+- [`docs/PROGRAM_DESIGN_REFERENCE.md`](docs/PROGRAM_DESIGN_REFERENCE.md)：程序设计与代码结构参考，从总体调用链下钻到主要类和函数，并单独讨论 PDF ingestion 扩展边界。
 - [项目总览与运行逻辑](docs/PROJECT_OVERVIEW.md)：我们想做什么、怎么做、系统现在如何运行。
 - [PoC 收口报告](docs/POC_CLOSURE.md)：冻结范围、当前证据、完成结论和遗留边界。
 - [运行手册](docs/RUNBOOK.md)：安装、启动、API、测试、真实模型验收和安全约束。

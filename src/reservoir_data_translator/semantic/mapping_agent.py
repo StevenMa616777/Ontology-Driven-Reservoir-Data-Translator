@@ -69,20 +69,24 @@ Rules:
 1. Never invent missing values or infer numerical values without evidence.
 2. Use only ontology concepts supplied in ontology_candidates.
 3. Use only canonical paths matching the supplied canonical_path_template.
-4. Preserve source text and source_block_id.
-5. Identify a source unit only when the evidence states it.
-6. canonical_unit must exactly equal the selected candidate canonical_unit.
-7. Return confidence for every outcome.
-8. If two or more supplied concepts remain plausible, return AMBIGUOUS.
-9. If no supplied concept is valid, return UNMAPPED.
-10. Return data conforming to the provided structured response model only.
-11. A table-level mapping must use the object described by value_contract;
+4. Map facts only from INPUT.raw_block. Every returned source_block_id must
+   exactly equal INPUT.raw_block.block_id.
+5. INPUT.document_structure is provenance-only context. Never emit a mapping
+   for another block or for facts found only in document_structure.
+6. Preserve source text and source_block_id.
+7. Identify a source unit only when the evidence states it.
+8. canonical_unit must exactly equal the selected candidate canonical_unit.
+9. Return confidence for every outcome.
+10. If two or more supplied concepts remain plausible, return AMBIGUOUS.
+11. If no supplied concept is valid, return UNMAPPED.
+12. Return data conforming to the provided structured response model only.
+13. A table-level mapping must use the object described by value_contract;
     never return null for a required structural value.
-12. The selected ontology_concept and canonical_path must come from the same
+14. The selected ontology_concept and canonical_path must come from the same
     candidate entry. Do not combine a concept with another candidate's path.
-13. Cover every explicit source fact in the block, including schedule facts at
+15. Cover every explicit source fact in raw_block, including schedule facts at
     the end of a paragraph. Do not silently omit a fact because other tables are long.
-14. Structural parent mappings are mandatory. For every concept listed in
+16. Structural parent mappings are mandatory. For every concept listed in
     required_structural_parents, if any returned ontology_concept starts with that
     parent plus ".", return exactly one mapping for the parent before all of its child
     mappings. The parent is required even when its structural value is not written
@@ -115,6 +119,10 @@ Rules:
 
         mappings: list[SemanticMappingOutcome] = []
         for block in document.blocks:
+            # Native PDF figures remain addressable source evidence, but chart/image
+            # interpretation is outside the current semantic mapping contract.
+            if block.block_type == "figure":
+                continue
             mappings.extend(await self.map_block(document, block))
         return SemanticMappingBatch(source_id=document.source_id, mappings=mappings)
 
@@ -207,8 +215,25 @@ Rules:
                 "file_name": document.file_name,
             },
             "raw_block": block.model_dump(mode="json"),
-            "document_context": [
-                context_block.model_dump(mode="json")
+            "mapping_scope": {
+                "evidence_field": "raw_block",
+                "source_block_id": block.block_id,
+                "instruction": (
+                    "Return mappings only for raw_block; document_structure is "
+                    "provenance-only and is not mapping evidence."
+                ),
+            },
+            "document_structure": [
+                {
+                    "block_id": context_block.block_id,
+                    "block_type": context_block.block_type,
+                    "source_location": context_block.source_location,
+                    "source_region": (
+                        context_block.source_region.model_dump(mode="json")
+                        if context_block.source_region is not None
+                        else None
+                    ),
+                }
                 for context_block in document.blocks
             ],
             "ontology_candidates": candidate_payload,
@@ -313,6 +338,17 @@ Rules:
         original_prompt: str,
         error: SemanticAgentContractError,
     ) -> str:
+        if error.code == "SOURCE_BLOCK_MISMATCH":
+            instruction = (
+                "Regenerate the complete JSON response using facts only from "
+                "INPUT.raw_block. Set every source_block_id exactly to "
+                "INPUT.raw_block.block_id. Do not map document_structure."
+            )
+        else:
+            instruction = (
+                "Regenerate the complete JSON response. Correct the rejected "
+                "mapping while preserving all valid facts from INPUT.raw_block."
+            )
         return (
             original_prompt
             + "\nCORRECTION REQUIRED:\n"
@@ -320,10 +356,7 @@ Rules:
                 {
                     "error_code": error.code,
                     "error_message": str(error),
-                    "instruction": (
-                        "Regenerate the complete JSON response. Correct the rejected "
-                        "mapping while preserving all valid source facts."
-                    ),
+                    "instruction": instruction,
                 },
                 ensure_ascii=False,
                 sort_keys=True,

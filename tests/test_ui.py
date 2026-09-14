@@ -24,6 +24,7 @@ async def test_workbench_root_serves_design_pipeline(
     assert "Target" in response.text
     assert 'id="source-input"' in response.text
     assert 'id="run-button"' in response.text
+    assert 'accept=".txt,.json,.csv,.xlsx,.pdf"' in response.text
     await client.aclose()
 
 
@@ -44,6 +45,7 @@ async def test_workbench_assets_expose_real_pipeline_and_review_gate(
     assert 'mapping.status !== "MAPPED"' in javascript.text
     assert "function openSelectedFile()" in javascript.text
     assert 'txt: "text/plain;charset=utf-8"' in javascript.text
+    assert '"xlsx", "pdf"' in javascript.text
     assert "URL.createObjectURL(previewFile)" in javascript.text
     assert 'fileSummary.addEventListener("click"' in javascript.text
     assert 'data-toggle="deepseek-trace"' in javascript.text
@@ -56,6 +58,7 @@ async def test_workbench_assets_expose_real_pipeline_and_review_gate(
     assert "输出尝试 / 网络尝试" in javascript.text
     assert "readable_log_url" in javascript.text
     assert "查看去除转义与特殊字符的易读日志" in javascript.text
+    assert "本次转换未完成" in javascript.text
     assert stylesheet.status_code == 200
     assert stylesheet.headers["content-type"].startswith("text/css")
     assert ".readable-text body { zoom: 1.1; }" in stylesheet.text

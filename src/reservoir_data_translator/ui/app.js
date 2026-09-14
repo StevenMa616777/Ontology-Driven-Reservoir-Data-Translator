@@ -68,8 +68,8 @@ function setSelectedFile(file) {
     renderError("SOURCE_TOO_LARGE", "文件超过 16 MB PoC 上限，请缩小后重试。");
     return;
   }
-  if (![...TEXT_EXTENSIONS, "xlsx"].includes(extensionFor(file.name))) {
-    renderError("UNSUPPORTED_FILE", "当前仅支持 TXT、JSON、CSV 和 XLSX。");
+  if (![...TEXT_EXTENSIONS, "xlsx", "pdf"].includes(extensionFor(file.name))) {
+    renderError("UNSUPPORTED_FILE", "当前仅支持 TXT、JSON、CSV、XLSX 和原生文本 PDF。");
     return;
   }
   state.file = file;
@@ -204,7 +204,7 @@ function renderError(code, message) {
   elements.resultRoot.innerHTML = `
     <div class="error-state" role="alert">
       <span class="error-mark">!</span>
-      <div><p class="eyebrow">${escapeHtml(code)}</p><h2>本次转换未启动</h2>
+      <div><p class="eyebrow">${escapeHtml(code)}</p><h2>本次转换未完成</h2>
       <p>${escapeHtml(message)}</p></div>
     </div>`;
 }

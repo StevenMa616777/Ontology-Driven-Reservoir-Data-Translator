@@ -286,7 +286,7 @@ def test_builder_rejects_canonical_unit_not_owned_by_ontology(
     assert error.value.code == "CANONICAL_UNIT_MISMATCH"
 
 
-def test_builder_does_not_silently_discard_duplicate_evidence(
+def test_builder_accepts_idempotent_duplicate_evidence(
     registry: OntologyRegistry,
 ) -> None:
     mapping = _mapping(
@@ -296,8 +296,62 @@ def test_builder_does_not_silently_discard_duplicate_evidence(
         source_unit="year",
         canonical_unit="day",
     )
+    duplicate = _mapping(
+        "schedule.duration",
+        "schedule.duration",
+        5,
+        source_unit="year",
+        canonical_unit="day",
+        block="supporting-block",
+    )
+
+    model = CanonicalBuilder(registry).build([mapping, duplicate])
+
+    assert model.schedule.duration is not None
+    assert model.schedule.duration.value == pytest.approx(1825.0)
+
+
+def test_builder_accepts_duplicate_structural_parent_from_text_and_table(
+    registry: OntologyRegistry,
+    demo_mappings: list[SemanticMapping],
+) -> None:
+    parent = next(
+        mapping
+        for mapping in demo_mappings
+        if mapping.ontology_concept == "scal.relative_permeability"
+    )
+    duplicate = _mapping(
+        parent.ontology_concept,
+        parent.canonical_path,
+        parent.value,
+        block="pdf-table-block",
+    )
+
+    model = CanonicalBuilder(registry).build([*demo_mappings, duplicate])
+
+    assert model.scal.relative_permeability[0].id == "ow-relperm-1"
+
+
+def test_builder_still_rejects_conflicting_duplicate_evidence(
+    registry: OntologyRegistry,
+) -> None:
+    first = _mapping(
+        "schedule.duration",
+        "schedule.duration",
+        5,
+        source_unit="year",
+        canonical_unit="day",
+    )
+    second = _mapping(
+        "schedule.duration",
+        "schedule.duration",
+        6,
+        source_unit="year",
+        canonical_unit="day",
+        block="other-block",
+    )
 
     with pytest.raises(CanonicalBuildError) as error:
-        CanonicalBuilder(registry).build([mapping, mapping])
+        CanonicalBuilder(registry).build([first, second])
 
     assert error.value.code == "DUPLICATE_CANONICAL_ASSIGNMENT"

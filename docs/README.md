@@ -7,6 +7,7 @@
 
 - [`README.md`](../README.md)：仓库首页、快速开始、能力边界和文档导航。
 - [`PROJECT_OVERVIEW.md`](PROJECT_OVERVIEW.md)：项目目标、实现路线、组件职责和当前运行逻辑。
+- [`PROGRAM_DESIGN_REFERENCE.md`](PROGRAM_DESIGN_REFERENCE.md)：当前代码从系统、模块、文件到主要类/函数的设计参考，并包含 PDF ingestion 拟议扩展。
 - [`RUNBOOK.md`](RUNBOOK.md)：开发、启动、测试、真实模型验收和故障排查。
 
 ## 设计合同

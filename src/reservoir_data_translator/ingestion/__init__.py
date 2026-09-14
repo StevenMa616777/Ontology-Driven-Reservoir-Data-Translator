@@ -8,13 +8,21 @@ from .base import DocumentParser, IngestionError
 from .csv_parser import CsvParser
 from .excel_parser import ExcelParser, XlsxParser
 from .json_parser import JsonParser
-from .models import BlockType, RawBlock, RawDocument
+from .models import (
+    BlockType,
+    BoundingBox,
+    CharacterSpan,
+    RawBlock,
+    RawDocument,
+    SourceRegion,
+)
+from .pdf_parser import PDFParser, PdfParser
 from .text_parser import TextParser, TxtParser
 
 
 _PARSERS: dict[str, type[DocumentParser]] = {
     suffix: parser
-    for parser in (TextParser, JsonParser, CsvParser, ExcelParser)
+    for parser in (TextParser, JsonParser, CsvParser, ExcelParser, PdfParser)
     for suffix in parser.suffixes
 }
 
@@ -39,13 +47,18 @@ def parse_document(
 
 __all__ = [
     "BlockType",
+    "BoundingBox",
+    "CharacterSpan",
     "CsvParser",
     "DocumentParser",
     "ExcelParser",
     "IngestionError",
     "JsonParser",
+    "PDFParser",
+    "PdfParser",
     "RawBlock",
     "RawDocument",
+    "SourceRegion",
     "TextParser",
     "TxtParser",
     "XlsxParser",

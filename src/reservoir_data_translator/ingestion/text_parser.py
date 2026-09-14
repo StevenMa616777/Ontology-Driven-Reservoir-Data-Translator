@@ -8,6 +8,9 @@ import re
 from .base import DocumentParser, IngestionError
 from .models import RawBlock, RawDocument
 
+# TODO: 目前仍然以“看到空行就上下分块”的逻辑获得 RawBlock
+#   如果没有空行，可能导致 Block过大，影响 LLM识别精度，甚至 API过载
+#   拟引入 chunking strategy重构分块的逻辑
 
 class TextParser(DocumentParser):
     """Split UTF-8 text into non-empty paragraph blocks with line provenance."""

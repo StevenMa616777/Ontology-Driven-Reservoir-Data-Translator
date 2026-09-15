@@ -15,3 +15,6 @@ build/
 LLM/**/api_key
 LLM/**/api_key.*
 artifacts/
+tmp
+油藏数据语义转换_技术与进展说明_2026-09-09.md
+油藏数据语义转换系统_PoC_v0.1_阶段收口文档_2026-09-09.md

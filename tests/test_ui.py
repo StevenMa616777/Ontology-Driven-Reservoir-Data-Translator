@@ -17,7 +17,7 @@ async def test_workbench_root_serves_design_pipeline(
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     assert response.headers["cache-control"] == "no-store, max-age=0"
-    assert response.headers["x-reservoir-ui-version"] == "trace-blocks-v2"
+    assert response.headers["x-reservoir-ui-version"] == "trace-prompt-log-v4"
     assert "Reservoir Translator Workbench" in response.text
     assert "Source" in response.text
     assert "Semantic" in response.text
@@ -26,7 +26,7 @@ async def test_workbench_root_serves_design_pipeline(
     assert "Target" in response.text
     assert 'id="source-input"' in response.text
     assert 'id="run-button"' in response.text
-    assert "/ui/app.js?v=trace-blocks-v2" in response.text
+    assert "/ui/app.js?v=trace-prompt-log-v4" in response.text
     assert 'accept=".txt,.json,.csv,.xlsx,.pdf"' in response.text
     await client.aclose()
 
@@ -65,6 +65,12 @@ async def test_workbench_assets_expose_real_pipeline_and_review_gate(
     assert "renderTraceDiff" in javascript.text
     assert "groupTraceCallChains" in javascript.text
     assert "renderPromptSemanticView" in javascript.text
+    assert "formatPromptInputForDisplay" in javascript.text
+    assert "formattedRequestInput" in javascript.text
+    assert 'data-trace-download="prompt"' in javascript.text
+    assert "下载格式化 Prompt Log" in javascript.text
+    assert "promptLogText" in javascript.text
+    assert "safeLogFilePart" in javascript.text
     assert "traceDiagnosisText" in javascript.text
     assert 'data-trace-filter="problems"' in javascript.text
     assert "输入未变化" in javascript.text

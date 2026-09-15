@@ -62,7 +62,7 @@ from .service import (
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 UI_ROOT = Path(__file__).resolve().parent.parent / "ui"
 DEFAULT_TRACE_ROOT = PROJECT_ROOT / "artifacts" / "deepseek_traces"
-UI_VERSION = "trace-blocks-v2"
+UI_VERSION = "trace-prompt-log-v4"
 
 
 class NoStoreStaticFiles(StaticFiles):

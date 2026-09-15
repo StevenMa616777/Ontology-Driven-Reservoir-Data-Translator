@@ -362,6 +362,32 @@ function parsedPrompt(call) {
   }
 }
 
+function formatPromptInputForDisplay(prompt) {
+  if (typeof prompt !== "string") return JSON.stringify(prompt, null, 2);
+  const marker = "\nINPUT:\n";
+  const correctionMarker = "\nCORRECTION REQUIRED:\n";
+  const markerIndex = prompt.indexOf(marker);
+  if (markerIndex < 0) return prompt;
+
+  const system = prompt.slice(0, markerIndex);
+  const remainder = prompt.slice(markerIndex + marker.length);
+  const correctionIndex = remainder.indexOf(correctionMarker);
+  const inputText = correctionIndex < 0 ? remainder : remainder.slice(0, correctionIndex);
+  const correctionText = correctionIndex < 0 ? "" : remainder.slice(correctionIndex + correctionMarker.length);
+  const prettyJson = (value) => {
+    try {
+      return JSON.stringify(JSON.parse(value), null, 2);
+    } catch {
+      return value;
+    }
+  };
+
+  const formattedInput = `${system}${marker}${prettyJson(inputText)}`;
+  return correctionIndex < 0
+    ? formattedInput
+    : `${formattedInput}${correctionMarker}${prettyJson(correctionText)}`;
+}
+
 function groupDeepSeekCalls(calls) {
   const groups = new Map();
   calls.forEach((call, index) => {
@@ -517,6 +543,7 @@ function renderTraceAttempt(call, attemptNumber, previousCall = null) {
   const parsed = parsedResponseOutput(call);
   const formattedOutput = parsed.value === null ? parsed.outputText : JSON.stringify(parsed.value, null, 2);
   const requestInput = call.request_payload?.input || "";
+  const formattedRequestInput = formatPromptInputForDisplay(requestInput);
   const requestInstructions = call.request_payload?.instructions || "";
   const inputState = !previousCall
     ? "初始输入"
@@ -539,7 +566,7 @@ function renderTraceAttempt(call, attemptNumber, previousCall = null) {
       <section><div class="trace-pane-heading"><h4>API 输出</h4><button type="button" data-trace-copy="output" data-trace-index="${call.trace_index}">复制输出</button></div><pre>${renderTraceCode(formattedOutput || "未返回 output_text。")}</pre></section>
       ${call.local_correction && validatedOutput ? `<section class="trace-normalized-output"><div class="trace-pane-heading"><h4>本地修正后的有效 JSON</h4><button type="button" data-trace-copy="validated" data-trace-index="${call.trace_index}">复制修正结果</button></div><pre>${renderTraceCode(validatedOutput)}</pre></section>` : ""}
       <details class="trace-semantic-prompt"><summary>语义视图：证据、候选与纠正指令</summary>${renderPromptSemanticView(call)}</details>
-      <details><summary>完整 Prompt / Input</summary><div class="trace-prompt-sections"><h5>Request Instructions</h5><pre>${escapeHtml(requestInstructions || "未提供。")}</pre><h5>Input</h5><pre>${escapeHtml(requestInput || "未提供。")}</pre></div></details>
+      <details><summary>完整 Prompt / Input</summary><div class="trace-prompt-sections"><h5>Request Instructions</h5><pre>${escapeHtml(requestInstructions || "未提供。")}</pre><div class="trace-pane-heading trace-prompt-pane-heading"><h5>Input</h5><button type="button" data-trace-download="prompt" data-trace-index="${call.trace_index}">下载格式化 Prompt Log</button></div><pre>${escapeHtml(formattedRequestInput || "未提供。")}</pre></div></details>
       <details><summary>原始 Request / Response</summary><div class="trace-payloads"><div><h4>Request</h4><pre>${escapeHtml(JSON.stringify(call.request_payload, null, 2))}</pre></div><div><h4>Response</h4><pre>${escapeHtml(JSON.stringify(call.response_payload, null, 2))}</pre></div></div></details>
     </div>
   </article>`;
@@ -718,6 +745,31 @@ function downloadText(content, fileName, type = "text/plain;charset=utf-8") {
   setTimeout(() => URL.revokeObjectURL(link.href), 0);
 }
 
+function promptLogText(trace, call) {
+  const request = call.request_payload || {};
+  const requestInstructions = request.instructions || "未提供。";
+  const formattedInput = formatPromptInputForDisplay(request.input || "") || "未提供。";
+  return [
+    "DeepSeek Prompt / Input",
+    `Translation: ${trace.translation_id || "unknown"}`,
+    `Block: ${call.source_block_id || "unknown"}`,
+    `Call: ${Number(call.trace_index) + 1}`,
+    `Reason: ${call.call_reason || "unknown"}`,
+    `Request ID: ${call.request_id || "unknown"}`,
+    "",
+    "=== REQUEST INSTRUCTIONS ===",
+    requestInstructions,
+    "",
+    "=== INPUT ===",
+    formattedInput,
+    "",
+  ].join("\n");
+}
+
+function safeLogFilePart(value) {
+  return String(value || "unknown").replace(/[^a-zA-Z0-9._-]+/g, "-");
+}
+
 async function copyWithFeedback(button, content) {
   await navigator.clipboard.writeText(content);
   const original = button.textContent;
@@ -726,6 +778,19 @@ async function copyWithFeedback(button, content) {
 }
 
 function wireDeepSeekTraceDetail(detail, trace) {
+  detail.querySelectorAll('[data-trace-download="prompt"]').forEach((downloadButton) => {
+    downloadButton.addEventListener("click", (downloadEvent) => {
+      const call = trace.calls?.[Number(downloadEvent.currentTarget.dataset.traceIndex)];
+      if (!call) return;
+      const fileName = [
+        "prompt",
+        safeLogFilePart(trace.translation_id),
+        safeLogFilePart(call.source_block_id),
+        `call-${Number(call.trace_index) + 1}`,
+      ].join("-") + ".log";
+      downloadText(promptLogText(trace, call), fileName);
+    });
+  });
   detail.querySelectorAll("[data-trace-copy]").forEach((copyButton) => {
     copyButton.addEventListener("click", (copyEvent) => {
       const action = copyEvent.currentTarget.dataset.traceCopy;

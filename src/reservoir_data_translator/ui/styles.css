@@ -267,6 +267,9 @@ select { width: 100%; height: 45px; padding: 0 12px; border: 1px solid var(--lin
 .trace-attempt-content > details > summary { padding: 11px 12px; color: var(--green); cursor: pointer; font-weight: 700; }
 .trace-prompt-sections { border-top: 1px solid var(--line); }
 .trace-prompt-sections h5 { margin: 0; padding: 10px 12px; background: #eef0ea; }
+.trace-prompt-sections .trace-prompt-pane-heading { padding: 0; background: #eef0ea; }
+.trace-prompt-sections .trace-prompt-pane-heading h5 { flex: 1; }
+.trace-prompt-sections .trace-prompt-pane-heading button { padding: 10px 12px; }
 .trace-semantic-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 12px; border-top: 1px solid var(--line); background: #f8f7f1; }
 .trace-semantic-grid > section, .trace-semantic-grid > details { min-width: 0; border: 1px solid var(--line); background: white; }
 .trace-semantic-grid h5 { margin: 0; padding: 10px 12px; border-bottom: 1px solid var(--line); background: #eef0ea; }

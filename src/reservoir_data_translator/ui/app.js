@@ -6,6 +6,7 @@ const state = {
   file: null,
   result: null,
   running: false,
+  translationFile: null,
 };
 
 const elements = {
@@ -23,11 +24,16 @@ const elements = {
 };
 
 class APIError extends Error {
-  constructor(code, message, status) {
+  constructor(code, message, status, detail = {}) {
     super(message);
     this.name = "APIError";
     this.code = code;
     this.status = status;
+    this.stage = detail.stage;
+    this.stageLabel = detail.stage_label;
+    this.resolution = detail.resolution;
+    this.context = detail.context;
+    this.deepseekTrace = detail.deepseek_trace;
   }
 }
 
@@ -69,7 +75,7 @@ function setSelectedFile(file) {
     return;
   }
   if (![...TEXT_EXTENSIONS, "xlsx", "pdf"].includes(extensionFor(file.name))) {
-    renderError("UNSUPPORTED_FILE", "当前仅支持 TXT、JSON、CSV、XLSX 和原生文本 PDF。");
+    renderError("UNSUPPORTED_FILE", "当前仅支持 TXT、JSON、CSV、XLSX 和 PDF。");
     return;
   }
   state.file = file;
@@ -107,16 +113,20 @@ async function fileToSource(file) {
 }
 
 function openSelectedFile() {
-  if (!state.file) return;
-  const extension = extensionFor(state.file.name);
+  openLocalFile(state.file);
+}
+
+function openLocalFile(file) {
+  if (!file) return;
+  const extension = extensionFor(file.name);
   const previewTypes = {
     txt: "text/plain;charset=utf-8",
     json: "application/json;charset=utf-8",
     csv: "text/csv;charset=utf-8",
   };
   const previewFile = previewTypes[extension]
-    ? new Blob([state.file], { type: previewTypes[extension] })
-    : state.file;
+    ? new Blob([file], { type: previewTypes[extension] })
+    : file;
   const objectUrl = URL.createObjectURL(previewFile);
   const opened = window.open(objectUrl, "_blank");
   if (!opened) {
@@ -146,6 +156,7 @@ async function postJson(path, body) {
       detail?.code || `HTTP_${response.status}`,
       detail?.message || "转换服务返回了无法解析的错误。",
       response.status,
+      detail || {},
     );
   }
   return payload;
@@ -160,6 +171,7 @@ async function getJson(path) {
       detail?.code || `HTTP_${response.status}`,
       detail?.message || "无法读取 DeepSeek Trace。",
       response.status,
+      detail || {},
     );
   }
   return payload;
@@ -194,19 +206,159 @@ function renderLoading() {
     <div class="loading-state">
       <span class="loading-pulse" aria-hidden="true"></span>
       <div><p class="eyebrow">PIPELINE RUNNING</p><h2>正在建立可追溯语义链路</h2>
-      <p>解析原文、检索 Ontology 并生成结构化映射。这一步可能需要几秒。</p></div>
+      <p id="translation-progress" role="status">正在提交任务。OCR 中间结果生成后即可浏览。</p></div>
     </div>`;
 }
 
-function renderError(code, message) {
+function errorStageLabel(code, details) {
+  if (details?.stageLabel) return details.stageLabel;
+  if (code.startsWith("PDF_")) return "PDF 文件解析";
+  if (code.startsWith("SEMANTIC_") || code.startsWith("DEEPSEEK_")) return "语义映射";
+  if (code.startsWith("CANONICAL_")) return "Canonical 构建";
+  return "输入处理";
+}
+
+function renderOcrIntermediate(artifact) {
+  let panel = document.querySelector("#ocr-intermediate");
+  if (!artifact) {
+    panel?.remove();
+    return;
+  }
+  if (!panel) {
+    panel = document.createElement("section");
+    panel.id = "ocr-intermediate";
+    panel.className = "ocr-intermediate";
+    elements.resultRoot.before(panel);
+  }
+  // Polling must not reload a preview the user is already reading.
+  const key = `${artifact.artifact_id}:${artifact.status}`;
+  if (panel.dataset.artifactKey === key) return;
+  panel.dataset.artifactKey = key;
+  const available = ["complete", "partial"].includes(artifact.status);
+  const partial = artifact.status === "partial";
+  panel.innerHTML = `
+    <h2>OCR 中间结果${partial ? " · 部分完成" : ""}</h2>
+    <p>${escapeHtml(artifact.file_name)} · 已识别 ${artifact.completed_pages.length} / ${artifact.total_pages} 页</p>
+    <p class="ocr-local-path">已保存到本地：${escapeHtml(artifact.local_path)}</p>
+    ${available ? `<div class="ocr-actions"><button type="button" class="button" data-ocr-original>浏览原始文件</button><a class="button" href="${escapeHtml(artifact.download_url)}">下载 OCR 中间结果</a><a href="${escapeHtml(artifact.raw_url)}" target="_blank" rel="noopener">下载原始 OCR JSON</a></div>
+    ${artifact.comparison_url ? `<details class="ocr-preview" data-ocr-comparison><summary>对照浏览源文件与 OCR 中间结果</summary><div data-ocr-comparison-body></div></details><p>红框标注 OCR block_bbox 和原始 block_label；相同 R 编号对应相同区域。左右两栏同步滚动、缩放和翻页。</p>` : `<details class="ocr-preview"><summary>浏览 OCR 中间结果</summary><iframe title="OCR 原始识别结果 PDF" data-src="${escapeHtml(artifact.preview_url)}"></iframe></details>`}
+    ${artifact.source_regions_download_url ? `<a class="button" href="${escapeHtml(artifact.source_regions_download_url)}">下载源文件 OCR 区域红框</a>` : ""}` : `<p>中间 PDF 未能生成。${escapeHtml(artifact.error || "请检查服务日志。")}</p><a href="${escapeHtml(artifact.raw_url)}" target="_blank" rel="noopener">下载已保存的 OCR JSON</a>`}
+    <p>内容来自 OCR 输出，未经切片、语义映射或数字纠正。${partial ? `已完成原文页：${escapeHtml(artifact.completed_pages.join("、"))}；其余页面未完成。` : ""}</p>`;
+  panel.querySelector("[data-ocr-original]")?.addEventListener("click", () => openLocalFile(state.translationFile));
+  panel.querySelectorAll("details").forEach(details => details.addEventListener("toggle", () => {
+    const frame = details.querySelector("iframe");
+    if (frame && details.open && !frame.getAttribute("src")) frame.src = frame.dataset.src;
+    if (details.open && details.hasAttribute("data-ocr-comparison") && !details.dataset.loaded) {
+      details.dataset.loaded = "true";
+      loadOcrComparison(details, artifact).catch(error => {
+        details.dataset.loaded = "";
+        details.querySelector("[data-ocr-comparison-body]").textContent = `对照视图加载失败：${error.message}。请收起后重新打开。`;
+      });
+    }
+  }));
+}
+
+async function loadOcrComparison(details, artifact) {
+  const body = details.querySelector("[data-ocr-comparison-body]");
+  body.textContent = "正在加载对照视图…";
+  const data = await getJson(artifact.comparison_url);
+  if (!details.isConnected) return;
+  body.innerHTML = `<div class="ocr-compare-toolbar"><button type="button" data-zoom-out aria-label="缩小两栏">−</button><span data-zoom-label>100%</span><button type="button" data-zoom-in aria-label="放大两栏">+</button><button type="button" data-zoom-reset>适合宽度</button><label>原文页 <select data-compare-page>${data.pages.map((page, i) => `<option value="${i}">${escapeHtml(artifact.completed_pages[i] ?? page.index)}</option>`).join("")}</select></label><span>滚动 / Ctrl + 滚轮缩放，两栏同步</span></div><div class="ocr-compare-columns">${["source", "result"].map(kind => `<section><h3>${kind === "source" ? "源文件 · OCR 区域" : "OCR 中间结果 · 识别区域"}</h3><div class="ocr-compare-scroll" tabindex="0" aria-label="${kind === "source" ? "源文件" : "OCR 结果"}同步浏览"><div class="ocr-compare-pages">${data.pages.map((page, i) => `<figure data-page-index="${i}" style="aspect-ratio:${page.width} / ${page.height}"><img loading="lazy" src="${escapeHtml(page[kind + "_url"])}" width="${page.width}" height="${page.height}" alt="原文第 ${escapeHtml(artifact.completed_pages[i] ?? page.index)} 页${kind === "source" ? "源文件" : "OCR 结果"}"></figure>`).join("")}</div></div></section>`).join("")}</div>`;
+  const panes = [...body.querySelectorAll(".ocr-compare-scroll")];
+  const pageSelect = body.querySelector("[data-compare-page]");
+  let zoom = 1;
+  let syncing = false;
+  function syncScroll(from, to) {
+    if (syncing) return;
+    if (Math.abs(to.scrollTop - from.scrollTop) < 1 && Math.abs(to.scrollLeft - from.scrollLeft) < 1) return;
+    syncing = true;
+    to.scrollTop = from.scrollTop;
+    to.scrollLeft = from.scrollLeft;
+    syncing = false;
+  }
+  function setZoom(value) {
+    const ratio = value / zoom;
+    const top = panes[0].scrollTop;
+    const left = panes[0].scrollLeft;
+    zoom = value;
+    const width = Math.max(100, Math.min(...panes.map(pane => pane.clientWidth)) - 24) * zoom;
+    panes.forEach(pane => {
+      pane.querySelector(".ocr-compare-pages").style.width = `${width}px`;
+      pane.scrollTop = top * ratio;
+      pane.scrollLeft = left * ratio;
+    });
+    body.querySelector("[data-zoom-label]").textContent = `${Math.round(zoom * 100)}%`;
+  }
+  panes.forEach((pane, i) => {
+    pane.addEventListener("scroll", () => {
+      syncScroll(pane, panes[1 - i]);
+      const figures = [...pane.querySelectorAll("figure")];
+      const index = figures.findLastIndex(figure => figure.offsetTop - figures[0].offsetTop <= pane.scrollTop + 16);
+      pageSelect.value = String(Math.max(0, index));
+    });
+    pane.addEventListener("wheel", event => {
+      if (!event.ctrlKey) return;
+      event.preventDefault();
+      setZoom(Math.max(0.5, Math.min(3, zoom + (event.deltaY < 0 ? 0.1 : -0.1))));
+    }, { passive: false });
+    pane.querySelectorAll("img").forEach(img => img.addEventListener("error", () => {
+      const message = document.createElement("span");
+      message.className = "ocr-page-error";
+      message.textContent = "本页加载失败，请收起后重新打开对照视图。";
+      img.replaceWith(message);
+      details.dataset.loaded = "";
+    }));
+  });
+  body.querySelector("[data-zoom-out]").addEventListener("click", () => setZoom(Math.max(0.5, zoom - 0.1)));
+  body.querySelector("[data-zoom-in]").addEventListener("click", () => setZoom(Math.min(3, zoom + 0.1)));
+  body.querySelector("[data-zoom-reset]").addEventListener("click", () => setZoom(1));
+  pageSelect.addEventListener("change", () => panes.forEach(pane => {
+    const figures = pane.querySelectorAll("figure");
+    pane.scrollTop = figures[Number(pageSelect.value)].offsetTop - figures[0].offsetTop;
+  }));
+  const observer = new ResizeObserver(() => {
+    if (!details.isConnected) { observer.disconnect(); return; }
+    if (details.open) setZoom(zoom);
+  });
+  observer.observe(panes[0]);
+  setZoom(1);
+}
+
+async function waitForTranslation(statusUrl) {
+  for (;;) {
+    const job = await getJson(statusUrl);
+    renderOcrIntermediate(job.ocr_intermediate);
+    renderAvailableDeepSeekTrace(job.deepseek_trace);
+    const progress = document.querySelector("#translation-progress");
+    const stages = { queued: "任务已排队，等待前一个任务完成。", ingest: "正在解析文件并判断是否需要 OCR。", ocr: `正在 OCR 识别，第 ${job.page || 1} / ${job.total_pages || "—"} 页。`, ocr_artifact: "OCR 中间结果已保存，正在整理识别结果。", semantic_map: job.ocr_intermediate ? "OCR 已完成，正在进行语义映射；现在可以浏览 OCR 中间结果。" : "本文件未使用 OCR，正在进行语义映射。" };
+    if (progress) progress.textContent = stages[job.stage] || "正在完成转换。";
+    if (job.status === "completed") return job.result;
+    if (job.status === "failed") {
+      const error = { ...(job.error || {}), deepseek_trace: job.deepseek_trace || job.error?.deepseek_trace };
+      throw new APIError(error.code || "TRANSLATION_FAILED", error.message || "转换失败。", 422, error);
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 750));
+  }
+}
+
+function renderError(code, message, details = {}) {
   updateRail(0);
+  const stageLabel = errorStageLabel(code, details);
+  const resolution = details?.resolution
+    ? `<div class="error-resolution"><strong>建议处理方式</strong><p>${escapeHtml(details.resolution)}</p></div>`
+    : "";
+  const context = details?.context && Object.keys(details.context).length
+    ? `<details class="error-context"><summary>查看技术详情</summary><pre>${escapeHtml(JSON.stringify(details.context, null, 2))}</pre></details>`
+    : "";
   elements.resultRoot.className = "result-shell";
   elements.resultRoot.innerHTML = `
     <div class="error-state" role="alert">
       <span class="error-mark">!</span>
       <div><p class="eyebrow">${escapeHtml(code)}</p><h2>本次转换未完成</h2>
-      <p>${escapeHtml(message)}</p></div>
-    </div>`;
+      <p class="error-stage"><strong>停止阶段：</strong>${escapeHtml(stageLabel)}</p>
+      <p>${escapeHtml(message)}</p>${resolution}${context}</div>
+    </div>${renderDeepSeekTraceShell(details.deepseekTrace || details.deepseek_trace)}`;
+  wireResultActions(details.deepseekTrace || details.deepseek_trace);
 }
 
 function reviewState(mapping) {
@@ -297,6 +449,20 @@ function renderValidationCard(title, validation) {
 function renderTrace(trace) {
   return (trace || []).map((event, index) => `
     <li class="trace-${event.status}"><span>${String(index + 1).padStart(2, "0")}</span><div><strong>${escapeHtml(event.stage.replaceAll("_", " "))}</strong>${event.detail ? `<small>${escapeHtml(event.detail)}</small>` : ""}</div><b>${escapeHtml(event.status)}</b></li>`).join("");
+}
+
+function renderAvailableDeepSeekTrace(summary) {
+  if (!summary) return;
+  let panel = document.querySelector("#available-deepseek-trace");
+  if (!panel) {
+    panel = document.createElement("div");
+    panel.id = "available-deepseek-trace";
+    elements.resultRoot.appendChild(panel);
+  }
+  if (panel.dataset.traceUrl === summary.trace_url) return;
+  panel.dataset.traceUrl = summary.trace_url;
+  panel.innerHTML = renderDeepSeekTraceShell(summary);
+  wireResultActions(summary);
 }
 
 function renderDeepSeekTraceShell(summary) {
@@ -729,7 +895,7 @@ async function continueAfterReview() {
     });
     document.querySelector("#canonical-result")?.scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (error) {
-    renderError(error.code || "REVIEW_CONTINUATION_FAILED", error.message || "人工审查后续流程执行失败。");
+    renderError(error.code || "REVIEW_CONTINUATION_FAILED", error.message || "人工审查后续流程执行失败。", error);
   } finally {
     setRunning(false);
   }
@@ -841,7 +1007,7 @@ function wireDeepSeekTraceDetail(detail, trace) {
   });
 }
 
-function wireResultActions() {
+function wireResultActions(traceSummary = state.result?.deepseek_trace) {
   const reviewChecks = [...document.querySelectorAll("[data-review-index]")];
   const reviewButton = document.querySelector("#review-continue");
   reviewChecks.forEach((checkbox) => checkbox.addEventListener("change", () => {
@@ -864,8 +1030,8 @@ function wireResultActions() {
     detail.innerHTML = '<p class="trace-loading">正在读取本地 Trace 文件…</p>';
     try {
       const [trace, readableLog] = await Promise.all([
-        getJson(state.result.deepseek_trace.trace_url),
-        getText(state.result.deepseek_trace.readable_log_url),
+        getJson(traceSummary.trace_url),
+        getText(traceSummary.readable_log_url),
       ]);
       detail.innerHTML = renderDeepSeekTraceDetail(trace, readableLog);
       detail.dataset.loaded = "true";
@@ -899,9 +1065,11 @@ async function runTranslation() {
     return;
   }
   setRunning(true);
+  state.translationFile = state.file;
+  renderOcrIntermediate(null);
   renderLoading();
   try {
-    const source = state.file ? await fileToSource(state.file) : {
+    const source = state.translationFile ? await fileToSource(state.translationFile) : {
       file_name: "source.txt",
       content: pasted,
       content_encoding: "utf-8",
@@ -913,11 +1081,13 @@ async function runTranslation() {
       schema_version: "0.1.0",
     };
     if (elements.sourceSystem.value) body.source_system = elements.sourceSystem.value;
-    const result = await postJson("/translate", body);
+    const job = await postJson("/translation-jobs", body);
+    const result = await waitForTranslation(job.status_url);
+    renderOcrIntermediate(result.ocr_intermediate);
     renderResult(result);
     elements.resultRoot.scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (error) {
-    renderError(error.code || "TRANSLATION_FAILED", error.message || "转换过程中发生未知错误。");
+    renderError(error.code || "TRANSLATION_FAILED", error.message || "转换过程中发生未知错误。", error);
   } finally {
     setRunning(false);
   }

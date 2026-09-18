@@ -9,7 +9,12 @@ import tempfile
 from typing import Iterable
 
 from reservoir_data_translator.canonical import CanonicalBuilder, ReservoirSimulationModel
-from reservoir_data_translator.ingestion import IngestionError, RawDocument, parse_document
+from reservoir_data_translator.ingestion import (
+    IngestionError,
+    PdfParser,
+    RawDocument,
+    parse_document,
+)
 from reservoir_data_translator.mappers import PlatformMapper, PlatformMapperRegistry
 from reservoir_data_translator.ontology import OntologyRegistry
 from reservoir_data_translator.semantic import (
@@ -53,6 +58,7 @@ class PipelineServices:
         provider: SemanticModelProvider | None = None,
         mappers: Iterable[PlatformMapper] = (),
         source_mappings: Iterable[SourceMappingRegistry] = (),
+        pdf_parser: PdfParser | None = None,
     ) -> None:
         mapper_list = tuple(mappers)
         self.registry = registry
@@ -63,6 +69,7 @@ class PipelineServices:
             export_validator=ExportValidator(mapper_list),
         )
         self.builder = CanonicalBuilder(registry)
+        self.pdf_parser = pdf_parser
         self._source_mappings = {
             mapping.source_system.casefold(): mapping for mapping in source_mappings
         }
@@ -97,12 +104,18 @@ class PipelineServices:
 
         suffix = Path(file_name).suffix
         with tempfile.TemporaryDirectory(prefix="reservoir-ingest-") as directory:
-            temporary_path = Path(directory) / f"source{suffix}"
+            temporary_path = Path(directory) / file_name
             temporary_path.write_bytes(payload)
-            document = parse_document(
-                temporary_path,
-                source_id=source_input.source_id or file_name,
-            )
+            if suffix.casefold() == ".pdf" and self.pdf_parser is not None:
+                document = self.pdf_parser.parse(
+                    temporary_path,
+                    source_id=source_input.source_id or file_name,
+                )
+            else:
+                document = parse_document(
+                    temporary_path,
+                    source_id=source_input.source_id or file_name,
+                )
         return document.model_copy(update={"file_name": file_name})
 
     async def semantic_map(

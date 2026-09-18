@@ -1,7 +1,7 @@
 # Ontology-Driven Reservoir Data Translator
 
 面向油藏数值模拟资料的语义转换 PoC：把异构的 TXT、JSON、CSV、XLSX、
-原生文本 PDF
+原生文本 PDF 和整页扫描 PDF（可选 OCR）
 资料转换为统一的 Canonical Data Model，再由确定性程序生成 Eclipse/OPM
 INCLUDE 或 CMG Demo 片段。
 
@@ -26,7 +26,7 @@ INCLUDE 或 CMG Demo 片段。
 
 ```mermaid
 flowchart LR
-    A[TXT / JSON / CSV / XLSX / native PDF] --> B[Ingestion<br/>RawDocument]
+    A[TXT / JSON / CSV / XLSX / native or scanned PDF] --> B[Ingestion<br/>RawDocument]
     B --> C[Ontology Retrieval]
     C --> D[LLM Semantic Mapping]
     D --> E{Review Gate}
@@ -58,7 +58,7 @@ flowchart LR
 
 | 能力 | 当前状态 |
 |---|---|
-| 输入 | TXT、JSON、CSV、XLSX、原生文本 PDF；PDF 保留 page、bbox、阅读顺序和分块 span；OCR 不在当前范围 |
+| 输入 | TXT、JSON、CSV、XLSX、原生文本 PDF，以及可选 PaddleOCR 整页扫描 PDF；PDF 保留 page、bbox、阅读顺序、分块 span 和提取证据 |
 | 语义层 | 外部 YAML Ontology、Source Mapping、受控检索、DeepSeek V4 Flash |
 | Canonical | Rock、Fluid/PVT、SCAL、Well/Control、Schedule |
 | 单位 | 压力、速率、黏度、密度、时间、压缩系数的受控换算 |
@@ -83,6 +83,28 @@ python3 -m venv .venv
 
 浏览器打开 `http://127.0.0.1:8000/`。在没有 Provider 凭据时，确定性 endpoint
 仍可使用，语义转换 endpoint 会明确返回 `SEMANTIC_PROVIDER_NOT_CONFIGURED`。
+
+应用默认使用延迟加载的 PaddleOCR 后端：普通文本 PDF 不加载模型，只有扫描件或禁止
+文本提取但可渲染的 PDF 才进入 OCR。OCR 默认使用 `gpu:0`；部署时先按
+[运行手册](docs/RUNBOOK.md#21-可选-ocr-依赖)从官方 CUDA 源安装 GPU 运行时，再安装 OCR 依赖：
+
+```bash
+.venv/bin/python -m pip install '.[ocr]'
+export RESERVOIR_OCR_LANGUAGES='ch,en'
+```
+
+CPU 运行时与 GPU 运行时不要同时安装。GPU 不可用时网页会明确报错，系统不自动退回 CPU；
+仅需 CPU 的部署可安装 `.[ocr-cpu]` 并显式设置 `RESERVOIR_OCR_DEVICE=cpu`。
+
+PDF 声明禁止复制/文本提取时，系统会自动逐页渲染并进入 OCR，不生成中间 PDF；
+提取证据会记录 `SOURCE_TEXT_EXTRACTION_RESTRICTED`。只有页面无法打开或渲染、OCR
+依赖不可用、识别失败或置信度不足时才中止。
+
+当前 OCR 范围是“整个 PDF 均为扫描页”。原生文本 PDF 继续使用已有解析流程；同时包含
+原生页和扫描页的混合 PDF 会返回 `PDF_HYBRID_UNSUPPORTED`，不会静默拼接不完整结果。
+OCR 输出会适配成既有的 `text`、`table`、`figure` `RawBlock`，所以下游
+Retriever、Semantic Mapping 和 Canonical 流程无需改造。完整配置见
+[运行手册](docs/RUNBOOK.md#4-扫描-pdf-ocr-配置)。
 
 真实转换会把逐次 DeepSeek 请求、Token、Prompt 和响应审计写入被 Git 忽略的
 `artifacts/deepseek_traces/`，并可在结果页按按钮展开。该目录包含客户原始内容，
@@ -152,6 +174,16 @@ Eclipse INCLUDE → OPM 2025.10 Parser → Golden 语义比较，并把不含密
 - [Ontology 约定](ONTOLOGY_CONVENTIONS.md)：概念、别名、关系、单位和版本规则。
 - [原始 PoC 企划](docs/archive/ORIGINAL_POC_BRIEF_ZH.md)：最初的业务目标与成功标准，作为历史基线保留。
 
+## OCR 中间结果
+
+工作台点击“开始翻译”后会提交后台任务。OCR 完成时即可展开“浏览 OCR 中间结果”，
+也可浏览原始文件、下载中间 PDF 和原始 OCR JSON；此时语义映射可以仍在执行。
+中间文件默认持久保存在项目的 `tmp/ocr_intermediates/`，名称为
+`原始文件名_YYYY-MM-DD.pdf`，重名依次追加 `(2)`、`(3)`，不覆盖历史文件。
+同名 `.raw.json` 保存模型的原始 JSON 输出，`.manifest.json` 保存页数、版本和完成状态。
+低置信度拦截发生在保存之后；后续翻译失败不会删除中间文件。原生文本路径不生成 OCR 文件。
+详细接口与运行边界见 [运行手册](docs/RUNBOOK.md#ocr-中间结果与后台任务)。
+
 ## 明确边界
 
 - Eclipse 输出通过固定版本 OPM Python Parser 和输出 Golden 比较，但尚未在真实
@@ -159,7 +191,8 @@ Eclipse INCLUDE → OPM 2025.10 Parser → Golden 语义比较，并把不含密
 - 当前没有带人工 Concept/Path 标签的代表性 Semantic Gold 数据集，因此不宣称
   extraction precision、recall 或 F1。
 - Review 批准和 trace 仅在本次请求/浏览器会话内存在，没有持久化审批、回放或审计库。
-- 没有认证授权、任务队列、对象存储、多租户、生产监控和部署加固。
+- 后台任务队列仅在单个服务进程内运行；没有持久化任务恢复、分布式队列、认证授权、
+  对象存储、多租户、生产监控和部署加固。
 - CMG 只证明同一 Canonical 可驱动第二个平台 Mapper，不代表 CMG 语法已验证。
 
 这些限制不会否定 PoC 结论，但它们决定了下一阶段应优先补“业务证据和真实消费”，

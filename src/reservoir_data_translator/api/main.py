@@ -3,22 +3,34 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import asyncio
 import json
 import os
+from io import BytesIO
+from threading import Lock
 from pathlib import Path
 from typing import Iterable
 import unicodedata
 from uuid import UUID, uuid4
+from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
+
+# PDFium (used by pdfplumber's image renderer) must not run concurrently.
+_ocr_render_lock = Lock()
 
 from reservoir_data_translator.canonical import (
     CanonicalBuildError,
     ReservoirSimulationModel,
 )
-from reservoir_data_translator.ingestion import IngestionError, RawDocument
+from reservoir_data_translator.ingestion import (
+    IngestionError,
+    PaddleOcrBackend,
+    PdfParser,
+    RawDocument,
+)
 from reservoir_data_translator.mappers import (
     CMGDemoMapper,
     EclipseDemoMapper,
@@ -57,12 +69,13 @@ from .service import (
     SemanticProviderNotConfigured,
     UnknownSourceSystemError,
 )
+from reservoir_data_translator.ingestion.ocr.artifacts import artifact_root, progress_callback, publish
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 UI_ROOT = Path(__file__).resolve().parent.parent / "ui"
 DEFAULT_TRACE_ROOT = PROJECT_ROOT / "artifacts" / "deepseek_traces"
-UI_VERSION = "trace-prompt-log-v4"
+UI_VERSION = "ocr-preview-v6"
 
 
 class NoStoreStaticFiles(StaticFiles):
@@ -87,6 +100,7 @@ def _configured_path(environment_name: str, default_name: str) -> Path | None:
 
 def _default_services(
     provider: SemanticModelProvider | None = None,
+    pdf_parser: PdfParser | None = None,
 ) -> PipelineServices | None:
     ontology_path = _configured_path("RESERVOIR_ONTOLOGY_PATH", "ontology")
     if ontology_path is None:
@@ -113,6 +127,57 @@ def _default_services(
         provider=provider or _default_semantic_provider(),
         mappers=mappers,
         source_mappings=source_mappings,
+        pdf_parser=pdf_parser or _default_pdf_parser(),
+    )
+
+
+def _default_pdf_parser() -> PdfParser:
+    backend_name = os.getenv("RESERVOIR_OCR_BACKEND", "paddleocr").strip().casefold()
+    if backend_name in {"", "none", "disabled", "off"}:
+        return PdfParser()
+    if backend_name not in {"paddle", "paddleocr", "ppstructurev3"}:
+        raise IngestionError(
+            "PDF_OCR_BACKEND_UNSUPPORTED",
+            f"Unsupported OCR backend {backend_name!r}.",
+        )
+    languages = tuple(
+        language.strip()
+        for language in os.getenv("RESERVOIR_OCR_LANGUAGES", "ch,en").split(",")
+        if language.strip()
+    )
+    minimum_confidence = float(
+        os.getenv("RESERVOIR_OCR_MIN_CONFIDENCE", "0.70")
+    )
+    backend = PaddleOcrBackend(
+        lang=os.getenv("RESERVOIR_OCR_LANG") or languages[0],
+        device=os.getenv("RESERVOIR_OCR_DEVICE", "gpu:0").strip() or "gpu:0",
+        paddlex_config=os.getenv("RESERVOIR_OCR_PADDLEX_CONFIG") or None,
+        minimum_confidence=minimum_confidence,
+        enable_mkldnn=(
+            os.getenv("RESERVOIR_OCR_ENABLE_MKLDNN", "false")
+            .strip()
+            .casefold()
+            in {"1", "true", "yes", "on"}
+        ),
+        cpu_threads=(
+            int(os.environ["RESERVOIR_OCR_CPU_THREADS"])
+            if os.getenv("RESERVOIR_OCR_CPU_THREADS")
+            else None
+        ),
+    )
+    return PdfParser(
+        ocr_backend=backend,
+        ocr_render_dpi=int(os.getenv("RESERVOIR_OCR_RENDER_DPI", "300")),
+        ocr_max_pixels_per_page=int(
+            os.getenv("RESERVOIR_OCR_MAX_PIXELS_PER_PAGE", "40000000")
+        ),
+        ocr_languages=languages,
+        reject_low_confidence_ocr=(
+            os.getenv("RESERVOIR_OCR_REJECT_LOW_CONFIDENCE", "true")
+            .strip()
+            .casefold()
+            in {"1", "true", "yes", "on"}
+        ),
     )
 
 
@@ -278,15 +343,17 @@ def create_app(
     provider: SemanticModelProvider | None = None,
     mappers: Iterable[PlatformMapper] | None = None,
     source_mappings: Iterable[SourceMappingRegistry] | None = None,
+    pdf_parser: PdfParser | None = None,
 ) -> FastAPI:
     if registry is None and mappers is None and source_mappings is None:
-        services = _default_services(provider)
+        services = _default_services(provider, pdf_parser)
     elif registry is not None:
         services = PipelineServices(
             registry,
             provider=provider,
             mappers=mappers or (),
             source_mappings=source_mappings or (),
+            pdf_parser=pdf_parser or _default_pdf_parser(),
         )
     else:
         raise ValueError("registry is required when explicit services are supplied")
@@ -297,6 +364,11 @@ def create_app(
         description="Ontology-driven staged reservoir data translation PoC.",
     )
     api.state.services = services
+    # One running translation per process protects the shared model instance.
+    translation_lock = asyncio.Lock()
+    jobs: dict[str, dict] = {}
+    background_tasks: set[asyncio.Task] = set()
+    api.state.translation_jobs = jobs
     api.mount("/ui", NoStoreStaticFiles(directory=UI_ROOT), name="ui")
 
     @api.get("/", include_in_schema=False)
@@ -428,11 +500,12 @@ def create_app(
         raise _http_error(404, "ONTOLOGY_CONCEPT_NOT_FOUND", f"Unknown concept {concept_id!r}.")
 
     @api.post("/ingest", response_model=RawDocument)
-    def ingest(request: SourceInput) -> RawDocument:
+    async def ingest(request: SourceInput) -> RawDocument:
         try:
-            return service().ingest(request)
+            async with translation_lock:
+                return await asyncio.to_thread(service().ingest, request)
         except IngestionError as exc:
-            raise _http_error(422, exc.code, str(exc)) from exc
+            raise _ingestion_http_error(exc) from exc
 
     @api.post("/semantic-map", response_model=SemanticMappingBatch)
     async def semantic_map(request: SemanticMapRequest) -> SemanticMappingBatch:
@@ -540,21 +613,38 @@ def create_app(
             ) from exc
         return PlainTextResponse(content, media_type="text/plain; charset=utf-8")
 
-    @api.post("/translate", response_model=TranslateResult)
-    async def translate(request: TranslateRequest) -> TranslateResult:
+    async def execute_translation(request: TranslateRequest, translation_id: str) -> TranslateResult:
         services = service()
-        translation_id = str(uuid4())
         trace: list[TranslationTraceEvent] = []
         try:
-            source = services.ingest(request.source)
-            trace.append(TranslationTraceEvent(stage="ingest", status="success"))
+            publish(stage="ingest")
+            source = await asyncio.to_thread(services.ingest, request.source)
+            restricted_ocr = any(
+                block.extraction_evidence is not None
+                and "SOURCE_TEXT_EXTRACTION_RESTRICTED"
+                in block.extraction_evidence.quality_flags
+                for block in source.blocks
+            )
+            trace.append(
+                TranslationTraceEvent(
+                    stage="ingest",
+                    status="success",
+                    detail=(
+                        "PDF text extraction was restricted; pages were rendered "
+                        "and processed through OCR automatically."
+                        if restricted_ocr
+                        else None
+                    ),
+                )
+            )
         except IngestionError as exc:
-            raise _http_error(422, exc.code, str(exc)) from exc
+            raise _ingestion_http_error(exc) from exc
 
         deepseek_calls: list[DeepSeekCallTrace] = []
         semantic_status = "failed"
         deepseek_trace_summary: DeepSeekTraceSummary | None = None
         try:
+            publish(stage="semantic_map")
             with capture_deepseek_traces() as deepseek_calls:
                 semantic = await services.semantic_map(
                     source,
@@ -579,6 +669,8 @@ def create_app(
                 deepseek_calls,
                 semantic_status=semantic_status,
             )
+            if deepseek_trace_summary is not None:
+                publish(deepseek_trace=deepseek_trace_summary.model_dump(mode="json"))
 
         if not semantic.mappings or semantic.review_required:
             low_confidence = sum(
@@ -679,6 +771,146 @@ def create_app(
             deepseek_trace=deepseek_trace_summary,
         )
 
+    async def run_translation(request: TranslateRequest, task_id: str, state: dict) -> TranslateResult:
+        loop = asyncio.get_running_loop()
+
+        def progress(event: dict) -> None:
+            loop.call_soon_threadsafe(state.update, event)
+
+        async with translation_lock:
+            state.update(status="running", stage="ingest")
+            token = progress_callback.set(progress)
+            try:
+                result = await execute_translation(request, task_id)
+                # Flush page events queued by the ingestion worker before attaching.
+                await asyncio.sleep(0)
+                return result.model_copy(update={"ocr_intermediate": state.get("ocr_intermediate")})
+            except HTTPException as exc:
+                # Deliver the semantic-finally event before exposing the failure.
+                await asyncio.sleep(0)
+                if state.get("deepseek_trace") and isinstance(exc.detail, dict):
+                    exc.detail["deepseek_trace"] = state["deepseek_trace"]
+                raise
+            finally:
+                progress_callback.reset(token)
+
+    @api.post("/translate", response_model=TranslateResult)
+    async def translate(request: TranslateRequest) -> TranslateResult:
+        state: dict = {}
+        try:
+            return await run_translation(request, str(uuid4()), state)
+        except HTTPException as exc:
+            if state.get("ocr_intermediate") and isinstance(exc.detail, dict):
+                exc.detail["ocr_intermediate"] = state["ocr_intermediate"]
+            raise
+
+    @api.post("/translation-jobs", status_code=202)
+    async def submit_translation(request: TranslateRequest) -> dict:
+        service()  # Configuration failures should be reported before accepting.
+        pending = sum(job["status"] in {"queued", "running"} for job in jobs.values())
+        if pending >= 8:
+            raise _http_error(429, "TRANSLATION_QUEUE_FULL", "翻译任务队列已满，请等待当前任务完成。")
+        for key in list(jobs):
+            if len(jobs) < 100:
+                break
+            if jobs[key]["status"] in {"completed", "failed"}:
+                del jobs[key]
+        task_id = str(uuid4())
+        state = {"task_id": task_id, "status": "queued", "stage": "queued", "ocr_intermediate": None}
+        jobs[task_id] = state
+
+        async def work() -> None:
+            try:
+                result = await run_translation(request, task_id, state)
+                state.update(status="completed", stage="complete", result=result.model_dump(mode="json"))
+            except HTTPException as exc:
+                state.update(status="failed", error=exc.detail)
+            except asyncio.CancelledError:
+                state.update(status="failed", error={"code": "TRANSLATION_INTERRUPTED", "message": "服务停止，翻译任务已中断。"})
+                raise
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception("Translation task failed: %s", task_id)
+                state.update(status="failed", error={"code": "TRANSLATION_FAILED", "message": "翻译任务执行失败，请检查服务日志。"})
+
+        task = asyncio.create_task(work())
+        background_tasks.add(task)
+        task.add_done_callback(background_tasks.discard)
+        return {"task_id": task_id, "status_url": f"/translation-jobs/{task_id}"}
+
+    @api.get("/translation-jobs/{task_id}")
+    async def translation_status(task_id: UUID) -> dict:
+        state = jobs.get(str(task_id))
+        if state is None:
+            raise _http_error(404, "TRANSLATION_JOB_NOT_FOUND", "任务不存在或服务已重启；已保存的 OCR 文件仍在本地目录中。")
+        return state
+
+    def ocr_intermediate(artifact_id: UUID, kind: str, download: bool = False) -> Response:
+        if kind not in {"pdf", "raw", "source-regions"}:
+            raise _http_error(404, "OCR_ARTIFACT_NOT_FOUND", "OCR 文件不存在。")
+        root = (services.pdf_parser.ocr_artifact_dir if services and services.pdf_parser else None) or artifact_root()
+        root = Path(root).resolve()
+        for manifest in root.glob("*.manifest.json"):
+            try:
+                metadata = json.loads(manifest.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if metadata.get("artifact_id") != str(artifact_id):
+                continue
+            # Resolve only known local files, never client-provided filesystem paths.
+            stem = manifest.name.removesuffix(".manifest.json")
+            suffix = {"pdf": ".pdf", "raw": ".raw.json", "source-regions": ".source-regions.pdf"}[kind]
+            path = (root / (stem + suffix)).resolve()
+            if path.parent != root or not path.is_file():
+                break
+            if kind == "raw":
+                # Format legacy compact artifacts too, without rewriting evidence.
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                return Response(
+                    json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+                    media_type="application/json",
+                    headers={"Cache-Control": "no-store", "Content-Disposition":
+                             f"attachment; filename*=utf-8''{quote(path.name)}"},
+                )
+            return FileResponse(path, media_type="application/pdf", filename=path.name, content_disposition_type="attachment" if download else "inline", headers={"Cache-Control": "no-store"})
+        raise _http_error(404, "OCR_ARTIFACT_NOT_FOUND", "OCR 文件尚未生成或不存在。")
+
+    @api.get("/ocr-intermediates/{artifact_id}/comparison")
+    def ocr_comparison(artifact_id: UUID) -> dict:
+        import pdfplumber
+
+        result = ocr_intermediate(artifact_id, "pdf")
+        source = ocr_intermediate(artifact_id, "source-regions")
+        with pdfplumber.open(result.path) as pdf, pdfplumber.open(source.path) as original:
+            if len(pdf.pages) != len(original.pages):
+                raise _http_error(409, "OCR_COMPARISON_PAGE_MISMATCH", "两份 PDF 页数不一致。")
+            return {"pages": [{"index": i, "width": page.width, "height": page.height,
+                               "source_url": f"/ocr-intermediates/{artifact_id}/source-regions/pages/{i}",
+                               "result_url": f"/ocr-intermediates/{artifact_id}/pdf/pages/{i}"}
+                              for i, page in enumerate(pdf.pages, 1)]}
+
+    @api.get("/ocr-intermediates/{artifact_id}/{kind}/pages/{page_number}")
+    def ocr_comparison_page(artifact_id: UUID, kind: str, page_number: int) -> Response:
+        import pdfplumber
+
+        if kind not in {"pdf", "source-regions"}:
+            raise _http_error(404, "OCR_ARTIFACT_NOT_FOUND", "OCR 文件不存在。")
+        artifact = ocr_intermediate(artifact_id, kind)
+        with _ocr_render_lock, pdfplumber.open(artifact.path) as pdf:
+            if not 1 <= page_number <= len(pdf.pages):
+                raise _http_error(404, "OCR_ARTIFACT_NOT_FOUND", "OCR 页面不存在。")
+            page = pdf.pages[page_number - 1]
+            dpi = min(144, 72 * (6_000_000 / (page.width * page.height)) ** 0.5)
+            rendered = page.to_image(resolution=dpi)
+            try:
+                stream = BytesIO()
+                rendered.original.save(stream, format="PNG")
+                return Response(stream.getvalue(), media_type="image/png", headers={"Cache-Control": "no-store"})
+            finally:
+                rendered.original.close()
+                rendered.annotated.close()
+
+    api.get("/ocr-intermediates/{artifact_id}/{kind}")(ocr_intermediate)
     return api
 
 
@@ -687,6 +919,20 @@ def _http_error(status_code: int, code: str, message: str) -> HTTPException:
         status_code=status_code,
         detail={"code": code, "message": message},
     )
+
+
+def _ingestion_http_error(error: IngestionError) -> HTTPException:
+    detail: dict[str, object] = {
+        "code": error.code,
+        "message": str(error),
+        "stage": error.stage or "ingest",
+        "stage_label": error.stage_label or "文件解析",
+    }
+    if error.resolution:
+        detail["resolution"] = error.resolution
+    if error.details:
+        detail["context"] = error.details
+    return HTTPException(status_code=422, detail=detail)
 
 
 app = create_app()

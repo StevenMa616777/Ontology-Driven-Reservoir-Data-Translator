@@ -97,3 +97,4 @@ class TranslateResult(CanonicalModel):
     target: TargetArtifact | None = None
     trace: list[TranslationTraceEvent] = Field(default_factory=list)
     deepseek_trace: DeepSeekTraceSummary | None = None
+    ocr_intermediate: dict | None = None

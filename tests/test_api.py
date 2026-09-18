@@ -1,4 +1,5 @@
 import base64
+import asyncio
 from io import BytesIO
 import json
 from pathlib import Path
@@ -7,10 +8,15 @@ from typing import Any
 import httpx
 from httpx import ASGITransport, AsyncClient
 import pytest
+from PIL import Image
 from openpyxl import Workbook
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.pdfencrypt import StandardEncryption
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
 from reservoir_data_translator.api import create_app
+from reservoir_data_translator.api.main import _default_pdf_parser
 from reservoir_data_translator.canonical import ReservoirSimulationModel
 from reservoir_data_translator.mappers import (
     CMGDemoMapper,
@@ -18,6 +24,23 @@ from reservoir_data_translator.mappers import (
     PlatformMappingRegistry,
 )
 from reservoir_data_translator.ontology import OntologyRegistry
+from reservoir_data_translator.ingestion import OcrPageResult, OcrRegion, PaddleOcrBackend, PdfParser
+
+
+def test_default_pdf_parser_uses_lazy_paddle_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("RESERVOIR_OCR_BACKEND", raising=False)
+    monkeypatch.delenv("RESERVOIR_OCR_DEVICE", raising=False)
+    parser = _default_pdf_parser()
+    assert isinstance(parser.ocr_backend, PaddleOcrBackend)
+    assert parser.ocr_backend.device == "gpu:0"
+
+
+def test_default_pdf_parser_respects_explicit_cpu_device(monkeypatch) -> None:
+    monkeypatch.setenv("RESERVOIR_OCR_BACKEND", "paddleocr")
+    monkeypatch.setenv("RESERVOIR_OCR_DEVICE", "cpu")
+    assert _default_pdf_parser().ocr_backend.device == "cpu"
 
 
 @pytest.mark.asyncio
@@ -151,6 +174,7 @@ class FailingSemanticProvider(SemanticModelProvider):
 def _configured_client(
     registry: OntologyRegistry,
     provider: SemanticModelProvider | None = None,
+    pdf_parser: PdfParser | None = None,
 ):
     mappers = [
         EclipseDemoMapper(
@@ -175,6 +199,7 @@ def _configured_client(
         provider=provider,
         mappers=mappers,
         source_mappings=source_mappings,
+        pdf_parser=pdf_parser,
     )
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
@@ -329,6 +354,142 @@ async def test_ingest_accepts_base64_native_text_pdf(
 
 
 @pytest.mark.asyncio
+async def test_ingest_accepts_base64_scanned_pdf_with_configured_ocr(
+    registry: OntologyRegistry,
+) -> None:
+    class Backend:
+        def analyze_page(
+            self,
+            image,
+            *,
+            page_number: int,
+            languages: tuple[str, ...],
+        ) -> OcrPageResult:
+            width, height = image.size
+            return OcrPageResult(
+                page_number=page_number,
+                image_width=width,
+                image_height=height,
+                engine="api-fixture-ocr",
+                regions=(
+                    OcrRegion(
+                        region_id="body",
+                        region_type="text",
+                        layout_label="text",
+                        bbox_pixels=(10, 10, width - 10, height - 10),
+                        reading_order=1,
+                        text="Minimum BHP 80 bar",
+                        confidence=0.97,
+                    ),
+                ),
+            )
+
+    page_image = BytesIO()
+    Image.new("RGB", (100, 100), "white").save(page_image, format="PNG")
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=letter)
+    pdf.drawImage(
+        ImageReader(BytesIO(page_image.getvalue())),
+        0,
+        0,
+        width=letter[0],
+        height=letter[1],
+    )
+    pdf.save()
+    client = _configured_client(
+        registry,
+        APIWellProvider(),
+        pdf_parser=PdfParser(ocr_backend=Backend(), ocr_render_dpi=72),
+    )
+
+    response = await client.post(
+        "/ingest",
+        json={
+            "file_name": "scan.pdf",
+            "content_encoding": "base64",
+            "content": base64.b64encode(buffer.getvalue()).decode("ascii"),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["blocks"][0]["content"] == "Minimum BHP 80 bar"
+    assert payload["blocks"][0]["extraction_evidence"]["engine"] == (
+        "api-fixture-ocr"
+    )
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_ingest_automatically_ocrs_restricted_pdf(
+    registry: OntologyRegistry,
+) -> None:
+    class Backend:
+        def analyze_page(
+            self,
+            image,
+            *,
+            page_number: int,
+            languages: tuple[str, ...],
+        ) -> OcrPageResult:
+            width, height = image.size
+            return OcrPageResult(
+                page_number=page_number,
+                image_width=width,
+                image_height=height,
+                engine="restricted-fixture-ocr",
+                regions=(
+                    OcrRegion(
+                        region_id="body",
+                        region_type="text",
+                        layout_label="text",
+                        bbox_pixels=(10, 10, width - 10, height - 10),
+                        reading_order=1,
+                        text="Minimum BHP 80 bar",
+                        confidence=0.97,
+                    ),
+                ),
+            )
+
+    encryption = StandardEncryption(
+        "",
+        ownerPassword="fixture-owner",
+        canPrint=1,
+        canModify=0,
+        canCopy=0,
+        canAnnotate=0,
+    )
+    page_image = BytesIO()
+    Image.new("RGB", (100, 100), "white").save(page_image, format="PNG")
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=letter, encrypt=encryption)
+    pdf.drawImage(ImageReader(BytesIO(page_image.getvalue())), 72, 72, 240, 320)
+    pdf.save()
+    client = _configured_client(
+        registry,
+        APIWellProvider(),
+        pdf_parser=PdfParser(ocr_backend=Backend(), ocr_render_dpi=72),
+    )
+
+    response = await client.post(
+        "/ingest",
+        json={
+            "file_name": "restricted.pdf",
+            "content_encoding": "base64",
+            "content": base64.b64encode(buffer.getvalue()).decode("ascii"),
+        },
+    )
+
+    assert response.status_code == 200
+    block = response.json()["blocks"][0]
+    assert block["content"] == "Minimum BHP 80 bar"
+    assert "SOURCE_TEXT_EXTRACTION_RESTRICTED" in (
+        block["extraction_evidence"]["quality_flags"]
+    )
+    await client.aclose()
+
+
+@pytest.mark.asyncio
 async def test_translate_persists_and_exposes_deepseek_call_trace(
     registry: OntologyRegistry,
     monkeypatch: pytest.MonkeyPatch,
@@ -419,6 +580,62 @@ async def test_translate_persists_and_exposes_deepseek_call_trace(
     assert (
         tmp_path / "deepseek-traces" / f'{trace["translation_id"]}.readable.log'
     ).is_file()
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("endpoint", ["/translate", "/translation-jobs"])
+@pytest.mark.parametrize("failure_stage", ["semantic", "canonical"])
+async def test_failed_translation_exposes_saved_trace(registry, monkeypatch, tmp_path, endpoint, failure_stage):
+    from reservoir_data_translator.canonical import CanonicalBuilder, CanonicalBuildError
+
+    monkeypatch.setenv("DEEPSEEK_TRACE_DIR", str(tmp_path / "traces"))
+
+    async def handler(request):
+        mappings = await APIWellProvider().structured_generate("", object)
+        if failure_stage == "semantic":
+            for mapping in mappings["mappings"]:
+                if mapping.get("source_unit"):
+                    mapping["value"] = {"value": mapping["value"], "unit": mapping["source_unit"]}
+        return httpx.Response(200, json={"id": "failure-trace", "status": "completed",
+            "output": [{"type": "message", "role": "assistant", "content": [
+                {"type": "output_text", "text": json.dumps(mappings)}]}]})
+
+    if failure_stage == "canonical":
+        def fail_build(*args, **kwargs):
+            raise CanonicalBuildError("CANONICAL_MODEL_INVALID", "Missing pressure")
+        monkeypatch.setattr(CanonicalBuilder, "build", fail_build)
+
+    provider = DeepSeekProvider("test-key", transport=httpx.MockTransport(handler))
+    client = _configured_client(registry, provider)
+    response = await client.post(endpoint, json={
+        "source": "A15井采用定液生产制度，日产液控制在500方，井底流压不得低于80 bar。",
+        "source_system": "client_c", "target_platform": "cmg"})
+    if endpoint == "/translate":
+        assert response.status_code >= 400
+        error = response.json()["detail"]
+    else:
+        assert response.status_code == 202
+        for _ in range(100):
+            job = (await client.get(response.json()["status_url"])).json()
+            if job["status"] == "failed":
+                break
+            await asyncio.sleep(0.01)
+        assert job["status"] == "failed"
+        error = job["error"]
+        assert job["deepseek_trace"] == error["deepseek_trace"]
+    summary = error["deepseek_trace"]
+    trace_response = await client.get(summary["trace_url"])
+    assert trace_response.status_code == 200
+    calls = trace_response.json()["calls"]
+    assert summary["api_requests"] == (2 if failure_stage == "semantic" else 1)
+    if failure_stage == "semantic":
+        assert error["code"] == "SEMANTIC_PHYSICAL_VALUE_INVALID"
+        assert calls[-1]["call_reason"] == "contract_retry"
+        assert calls[-1]["error_code"] == error["code"]
+    else:
+        assert error["code"] == "CANONICAL_MODEL_INVALID"
+    assert (await client.get(summary["readable_log_url"])).status_code == 200
     await client.aclose()
 
 

@@ -12,9 +12,18 @@ from .models import (
     BlockType,
     BoundingBox,
     CharacterSpan,
+    ExtractionEvidence,
     RawBlock,
     RawDocument,
     SourceRegion,
+)
+from .ocr import (
+    OcrBackend,
+    OcrBackendError,
+    OcrPageResult,
+    OcrRegion,
+    OcrTable,
+    PaddleOcrBackend,
 )
 from .pdf_parser import PDFParser, PdfParser
 from .text_parser import TextParser, TxtParser
@@ -52,9 +61,16 @@ __all__ = [
     "CsvParser",
     "DocumentParser",
     "ExcelParser",
+    "ExtractionEvidence",
     "IngestionError",
     "JsonParser",
+    "OcrBackend",
+    "OcrBackendError",
+    "OcrPageResult",
+    "OcrRegion",
+    "OcrTable",
     "PDFParser",
+    "PaddleOcrBackend",
     "PdfParser",
     "RawBlock",
     "RawDocument",

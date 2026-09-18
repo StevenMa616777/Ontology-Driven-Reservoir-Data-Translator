@@ -17,7 +17,7 @@ async def test_workbench_root_serves_design_pipeline(
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     assert response.headers["cache-control"] == "no-store, max-age=0"
-    assert response.headers["x-reservoir-ui-version"] == "trace-prompt-log-v4"
+    assert response.headers["x-reservoir-ui-version"] == "ocr-preview-v6"
     assert "Reservoir Translator Workbench" in response.text
     assert "Source" in response.text
     assert "Semantic" in response.text
@@ -26,7 +26,7 @@ async def test_workbench_root_serves_design_pipeline(
     assert "Target" in response.text
     assert 'id="source-input"' in response.text
     assert 'id="run-button"' in response.text
-    assert "/ui/app.js?v=trace-prompt-log-v4" in response.text
+    assert "/ui/app.js?v=failed-trace-v8" in response.text
     assert 'accept=".txt,.json,.csv,.xlsx,.pdf"' in response.text
     await client.aclose()
 
@@ -44,13 +44,22 @@ async def test_workbench_assets_expose_real_pipeline_and_review_gate(
     assert javascript.status_code == 200
     assert javascript.headers["content-type"].startswith("text/javascript")
     assert javascript.headers["cache-control"] == "no-store, max-age=0"
-    assert 'postJson("/translate"' in javascript.text
+    assert 'postJson("/translation-jobs"' in javascript.text
+    assert 'function renderOcrIntermediate' in javascript.text
+    assert 'async function waitForTranslation' in javascript.text
+    assert "renderAvailableDeepSeekTrace(job.deepseek_trace)" in javascript.text
+    assert "this.deepseekTrace = detail.deepseek_trace" in javascript.text
+    assert "getJson(traceSummary.trace_url)" in javascript.text
+    assert "getJson(state.result.deepseek_trace.trace_url)" not in javascript.text
+    assert 'if (code.startsWith("CANONICAL_")) return "Canonical 构建";' in javascript.text
+    assert 'code.startsWith("SEMANTIC_")' in javascript.text
     assert 'mapping.confidence < 0.80' in javascript.text
     assert 'mapping.status !== "MAPPED"' in javascript.text
     assert "function openSelectedFile()" in javascript.text
     assert 'txt: "text/plain;charset=utf-8"' in javascript.text
     assert '"xlsx", "pdf"' in javascript.text
     assert "URL.createObjectURL(previewFile)" in javascript.text
+    assert "state.translationFile = state.file" in javascript.text
     assert 'fileSummary.addEventListener("click"' in javascript.text
     assert 'data-toggle="deepseek-trace"' in javascript.text
     assert "renderDeepSeekTraceDetail" in javascript.text
@@ -84,6 +93,9 @@ async def test_workbench_assets_expose_real_pipeline_and_review_gate(
     assert "readable_log_url" in javascript.text
     assert "查看去除转义与特殊字符的易读日志" in javascript.text
     assert "本次转换未完成" in javascript.text
+    assert "停止阶段：" in javascript.text
+    assert "建议处理方式" in javascript.text
+    assert "detail.stage_label" in javascript.text
     assert stylesheet.status_code == 200
     assert stylesheet.headers["content-type"].startswith("text/css")
     assert ".readable-text body { zoom: 1.1; }" in stylesheet.text

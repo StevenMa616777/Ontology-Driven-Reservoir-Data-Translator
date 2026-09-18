@@ -9,6 +9,7 @@ description = "Ontology-driven translation foundation for reservoir simulation d
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "reportlab>=4,<5",
     "fastapi>=0.116,<1",
     "httpx>=0.28,<1",
     "openpyxl>=3.1.5,<4",
@@ -31,6 +32,14 @@ dev = [
 ]
 opm = [
     "opm==2025.10",
+]
+ocr = [
+    "paddleocr[doc-parser]>=3.5,<4",
+    "paddlepaddle-gpu>=3.2,<4",
+]
+ocr-cpu = [
+    "paddleocr[doc-parser]>=3.5,<4",
+    "paddlepaddle>=3.2,<4",
 ]
 
 [tool.setuptools.packages.find]

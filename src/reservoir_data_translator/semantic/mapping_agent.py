@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import math
+import numbers
 import re
 from typing import Any, Mapping
 
@@ -229,7 +231,7 @@ Rules:
                     "block_type": context_block.block_type,
                     "source_location": context_block.source_location,
                     "source_region": (
-                        context_block.source_region.model_dump(mode="json")
+                        context_block.source_region.model_dump(mode="json", exclude={"parts"})
                         if context_block.source_region is not None
                         else None
                     ),
@@ -436,6 +438,25 @@ Rules:
                     source_block_id=block.block_id,
                 )
             self._validate_structural_value(draft, block)
+            if concept.canonical_unit is not None:
+                valid_magnitude = False
+                if isinstance(draft.value, numbers.Real) and not isinstance(draft.value, bool):
+                    try:
+                        valid_magnitude = math.isfinite(float(draft.value))
+                    except (OverflowError, ValueError):
+                        pass
+                if not valid_magnitude:
+                    raise SemanticAgentContractError(
+                        "SEMANTIC_PHYSICAL_VALUE_INVALID",
+                        (
+                            f"Physical concept {concept.concept_id!r} at "
+                            f"{draft.canonical_path!r} requires value to be a finite "
+                            f"JSON number, got {draft.value!r}. Return the numeric "
+                            "magnitude directly in value and the unit separately "
+                            "in source_unit; do not wrap value in an object."
+                        ),
+                        source_block_id=block.block_id,
+                    )
             if concept.canonical_unit is not None and draft.source_unit is None:
                 raise SemanticAgentContractError(
                     "SOURCE_UNIT_REQUIRED",
@@ -593,6 +614,29 @@ Rules:
                 (
                     "Child values require their structural table mappings: "
                     f"{missing_parents}"
+                ),
+                source_block_id=block.block_id,
+            )
+
+        # Validate each point independently; another phase/index cannot supply
+        # its pressure. Only this source block's mapped evidence is considered.
+        point_fields: dict[str, set[str]] = {}
+        for path in paths:
+            match = re.fullmatch(r"(fluids\.(?:oil|water|gas)\.pvt\.points\[\d+\])\.([a-z_]+)", path)
+            if match:
+                point_fields.setdefault(match.group(1), set()).add(match.group(2))
+        missing_pressure = sorted(
+            f"{point}.pressure" for point, fields in point_fields.items()
+            if "pressure" not in fields
+        )
+        if missing_pressure:
+            raise SemanticAgentContractError(
+                "SEMANTIC_PVT_POINT_INCOMPLETE",
+                (
+                    f"PVT points require pressure; missing fields: {missing_pressure}. "
+                    "Regenerate the complete response using only explicit evidence "
+                    "in INPUT.raw_block. Do not invent pressure or borrow a value "
+                    "from another phase, point, or source block."
                 ),
                 source_block_id=block.block_id,
             )

@@ -25,6 +25,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ONTOLOGY_DIR = PROJECT_ROOT / "ontology"
 
 
+@pytest.fixture(scope="session", autouse=True)
+def isolated_ocr_artifacts(tmp_path_factory):
+    """Tests must not populate the user's persistent OCR output directory."""
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("RESERVOIR_OCR_ARTIFACT_DIR", str(tmp_path_factory.mktemp("ocr-artifacts")))
+        yield
+
+
 @pytest.fixture(scope="session")
 def registry() -> OntologyRegistry:
     return OntologyRegistry.load(ONTOLOGY_DIR)

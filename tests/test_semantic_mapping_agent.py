@@ -5,6 +5,7 @@ import pytest
 
 from reservoir_data_translator.canonical import CanonicalBuilder
 from reservoir_data_translator.ingestion import RawBlock, RawDocument, parse_document
+from reservoir_data_translator.ingestion.models import BoundingBox, SourceRegion, SourceRegionPart
 from reservoir_data_translator.ontology import OntologyRegistry
 from reservoir_data_translator.semantic import (
     AmbiguousSemanticMapping,
@@ -151,6 +152,63 @@ async def test_prompt_exposes_other_blocks_as_structure_without_their_content(
     ]
     assert "SECRET_OTHER_BLOCK_FACT" not in prompt
     assert "Every returned source_block_id must" in prompt
+
+    other.source_region = SourceRegion(
+        region_id="other", parent_region_id="page2", page=2,
+        bbox=BoundingBox(x0=0, top=0, x1=100, bottom=20), reading_order=1,
+        extraction_method="pdf_ocr_text:page",
+        parts=[SourceRegionPart(region_id="original", bbox=BoundingBox(x0=0, top=0, x1=100, bottom=20),
+                                extraction_method="pdf_ocr_text:region", text="SECRET_OTHER_BLOCK_FACT")],
+    )
+    await SemanticMappingAgent(registry, provider).map_block(document, block)
+    assert "SECRET_OTHER_BLOCK_FACT" not in provider.calls[-1][0]
+    payload = json.loads(provider.calls[-1][0].split("INPUT:\n", 1)[1])
+    assert "parts" not in payload["document_structure"][1]["source_region"]
+
+
+def _duration_response(value):
+    return {"mappings": [{
+        "status": "MAPPED", "source_block_id": "block_0001",
+        "ontology_concept": "schedule.duration", "canonical_path": "schedule.duration",
+        "value": value, "source_unit": "year", "canonical_unit": "day", "confidence": 0.99,
+    }]}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_value", [
+    {"value": 5, "unit": "year"}, "5", True, False, None, [5],
+    float("nan"), float("inf"), float("-inf"), 10 ** 400,
+])
+async def test_physical_value_contract_retries_invalid_magnitude(registry, bad_value):
+    block = RawBlock(block_id="block_0001", block_type="text", content="Simulation duration is 5 years")
+    provider = SequenceProvider([_duration_response(bad_value), _duration_response(5)])
+    batch = await SemanticMappingAgent(registry, provider).map_document(_document(block))
+    assert batch.mapped[0].value == 5
+    assert len(provider.prompts) == 2
+    assert "SEMANTIC_PHYSICAL_VALUE_INVALID" in provider.prompts[1]
+    assert "schedule.duration" in provider.prompts[1].split("CORRECTION REQUIRED:")[1]
+
+
+@pytest.mark.asyncio
+async def test_physical_value_contract_stops_when_retries_exhausted(registry):
+    block = RawBlock(block_id="block_0001", block_type="text", content="Simulation duration is 5 years")
+    bad = _duration_response({"value": 5, "unit": "year"})
+    provider = SequenceProvider([bad, bad])
+    with pytest.raises(SemanticAgentContractError) as error:
+        await SemanticMappingAgent(registry, provider).map_document(_document(block))
+    assert error.value.code == "SEMANTIC_PHYSICAL_VALUE_INVALID"
+    assert error.value.source_block_id == "block_0001"
+    assert len(provider.prompts) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", [0, 5, 5.25, -5])
+async def test_physical_value_contract_accepts_finite_numbers_without_retry(registry, value):
+    block = RawBlock(block_id="block_0001", block_type="text", content="Simulation duration is 5 years")
+    provider = SequenceProvider([_duration_response(value)])
+    batch = await SemanticMappingAgent(registry, provider).map_document(_document(block))
+    assert batch.mapped[0].value == value
+    assert len(provider.prompts) == 1
 
 
 @pytest.mark.asyncio

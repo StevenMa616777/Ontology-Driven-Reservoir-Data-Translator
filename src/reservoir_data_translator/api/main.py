@@ -62,6 +62,17 @@ from .service import (
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 UI_ROOT = Path(__file__).resolve().parent.parent / "ui"
 DEFAULT_TRACE_ROOT = PROJECT_ROOT / "artifacts" / "deepseek_traces"
+UI_VERSION = "trace-blocks-v2"
+
+
+class NoStoreStaticFiles(StaticFiles):
+    """Serve development UI assets without leaving stale scripts in the browser."""
+
+    async def get_response(self, path: str, scope: dict):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        response.headers["X-Reservoir-UI-Version"] = UI_VERSION
+        return response
 
 
 def _configured_path(environment_name: str, default_name: str) -> Path | None:
@@ -221,6 +232,15 @@ def _readable_deepseek_log(payload: dict) -> str:
                 f"Error: {_readable_text(call.get('error_code'))} "
                 f"{_readable_text(call.get('error_message'))}"
             )
+            for detail in call.get("error_details") or []:
+                location = detail.get("location") or detail.get("path") or ["<root>"]
+                if isinstance(location, list):
+                    location = ".".join(str(part) for part in location)
+                lines.append(
+                    f"Error detail: {_readable_text(location)} "
+                    f"{_readable_text(detail.get('type'))} "
+                    f"{_readable_text(detail.get('message'))}"
+                )
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -277,15 +297,21 @@ def create_app(
         description="Ontology-driven staged reservoir data translation PoC.",
     )
     api.state.services = services
-    api.mount("/ui", StaticFiles(directory=UI_ROOT), name="ui")
+    api.mount("/ui", NoStoreStaticFiles(directory=UI_ROOT), name="ui")
 
     @api.get("/", include_in_schema=False)
     def workbench() -> FileResponse:
-        return FileResponse(UI_ROOT / "index.html")
+        return FileResponse(
+            UI_ROOT / "index.html",
+            headers={"Cache-Control": "no-store, max-age=0", "X-Reservoir-UI-Version": UI_VERSION},
+        )
 
     @api.get("/ontology", include_in_schema=False)
     def ontology_explorer() -> FileResponse:
-        return FileResponse(UI_ROOT / "ontology.html")
+        return FileResponse(
+            UI_ROOT / "ontology.html",
+            headers={"Cache-Control": "no-store, max-age=0", "X-Reservoir-UI-Version": UI_VERSION},
+        )
 
     def service() -> PipelineServices:
         configured = api.state.services

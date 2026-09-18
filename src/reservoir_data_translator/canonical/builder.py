@@ -301,6 +301,13 @@ class CanonicalBuilder:
             container[key] = deepcopy(value)
             return
         existing = container[key]
+        # Repeated source evidence may legitimately produce the same canonical
+        # assignment (for example, a PDF table caption and the table itself).
+        # Treat an identical, already-normalized value as idempotent.  The
+        # SemanticMappingBatch remains the audit record for every supporting
+        # source block; the canonical model stores one deterministic value.
+        if self._assignments_are_equivalent(existing, value):
+            return
         if isinstance(existing, dict) and isinstance(value, Mapping):
             for nested_key, nested_value in value.items():
                 self._merge_assignment(existing, str(nested_key), nested_value)
@@ -309,6 +316,29 @@ class CanonicalBuilder:
             "DUPLICATE_CANONICAL_ASSIGNMENT",
             f"Canonical field {key!r} received more than one mapping",
         )
+
+    @staticmethod
+    def _assignments_are_equivalent(existing: Any, incoming: Any) -> bool:
+        if existing == incoming:
+            return True
+        if not isinstance(existing, Mapping) or not isinstance(incoming, Mapping):
+            return False
+
+        # PhysicalValue provenance and confidence describe the evidence, not
+        # the canonical engineering value.  Equal normalized value/unit pairs
+        # are therefore idempotent even when they came from different blocks.
+        physical_fields = {"value", "unit", "provenance", "confidence"}
+        if (
+            {"value", "unit"}.issubset(existing)
+            and {"value", "unit"}.issubset(incoming)
+            and set(existing).issubset(physical_fields)
+            and set(incoming).issubset(physical_fields)
+        ):
+            return (
+                existing["value"] == incoming["value"]
+                and existing["unit"] == incoming["unit"]
+            )
+        return False
 
     def _materialize(self, value: Any, *, collection_name: str | None = None) -> Any:
         if not isinstance(value, dict):

@@ -14,8 +14,15 @@ ResponseModel = TypeVar("ResponseModel", bound=BaseModel)
 class SemanticProviderError(RuntimeError):
     """Safe, provider-neutral failure surfaced by hosted model adapters."""
 
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        details: list[dict[str, Any]] | None = None,
+    ) -> None:
         self.code = code
+        self.details = details
         super().__init__(message)
 
 

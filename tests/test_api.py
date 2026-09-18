@@ -8,6 +8,7 @@ import httpx
 from httpx import ASGITransport, AsyncClient
 import pytest
 from openpyxl import Workbook
+from reportlab.pdfgen import canvas
 
 from reservoir_data_translator.api import create_app
 from reservoir_data_translator.canonical import ReservoirSimulationModel
@@ -294,6 +295,36 @@ async def test_translate_returns_complete_trace_and_target(
         "export_validation",
         "render",
     ]
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_ingest_accepts_base64_native_text_pdf(
+    registry: OntologyRegistry,
+) -> None:
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer)
+    pdf.drawString(72, 720, "Minimum BHP 80 bar")
+    pdf.save()
+    client = _configured_client(registry, APIWellProvider())
+
+    response = await client.post(
+        "/ingest",
+        json={
+            "file_name": "client.pdf",
+            "content_encoding": "base64",
+            "content": base64.b64encode(buffer.getvalue()).decode("ascii"),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source_type"] == "pdf"
+    assert payload["blocks"][0]["block_type"] == "text"
+    assert payload["blocks"][0]["source_region"]["page"] == 1
+    assert payload["blocks"][0]["source_region"]["bbox"]["coordinate_system"] == (
+        "pdf_top_left_points"
+    )
     await client.aclose()
 
 

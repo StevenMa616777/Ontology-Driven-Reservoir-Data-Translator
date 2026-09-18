@@ -91,6 +91,105 @@ async def test_agent_accepts_structured_mapping_from_supplied_candidates(
 
 
 @pytest.mark.asyncio
+async def test_prompt_exposes_other_blocks_as_structure_without_their_content(
+    registry: OntologyRegistry,
+) -> None:
+    block = RawBlock(
+        block_id="block_0001",
+        block_type="text",
+        content="Simulation duration is 5 years",
+        source_location="page 1",
+    )
+    other = RawBlock(
+        block_id="block_0002",
+        block_type="text",
+        content="SECRET_OTHER_BLOCK_FACT oil PVT pressure 100 bar",
+        source_location="page 2",
+    )
+    document = RawDocument(
+        source_id="scope-test",
+        source_type="pdf",
+        file_name="scope.pdf",
+        blocks=[block, other],
+    )
+    provider = FakeProvider(
+        {
+            "mappings": [
+                {
+                    "status": "MAPPED",
+                    "source_block_id": "block_0001",
+                    "ontology_concept": "schedule.duration",
+                    "canonical_path": "schedule.duration",
+                    "value": 5,
+                    "source_unit": "year",
+                    "canonical_unit": "day",
+                    "confidence": 0.99,
+                }
+            ]
+        }
+    )
+
+    await SemanticMappingAgent(registry, provider).map_block(document, block)
+
+    prompt = provider.calls[0][0]
+    payload = json.loads(prompt.split("INPUT:\n", 1)[1])
+    assert "document_context" not in payload
+    assert payload["mapping_scope"]["source_block_id"] == "block_0001"
+    assert payload["document_structure"] == [
+        {
+            "block_id": "block_0001",
+            "block_type": "text",
+            "source_location": "page 1",
+            "source_region": None,
+        },
+        {
+            "block_id": "block_0002",
+            "block_type": "text",
+            "source_location": "page 2",
+            "source_region": None,
+        },
+    ]
+    assert "SECRET_OTHER_BLOCK_FACT" not in prompt
+    assert "Every returned source_block_id must" in prompt
+
+
+@pytest.mark.asyncio
+async def test_source_block_mismatch_retry_reasserts_raw_block_scope(
+    registry: OntologyRegistry,
+) -> None:
+    block = RawBlock(
+        block_id="block_0001",
+        block_type="text",
+        content="Simulation duration is 5 years",
+    )
+    mapping = {
+        "status": "MAPPED",
+        "ontology_concept": "schedule.duration",
+        "canonical_path": "schedule.duration",
+        "value": 5,
+        "source_unit": "year",
+        "canonical_unit": "day",
+        "confidence": 0.99,
+    }
+    provider = SequenceProvider(
+        [
+            {"mappings": [{**mapping, "source_block_id": "block_0002"}]},
+            {"mappings": [{**mapping, "source_block_id": "block_0001"}]},
+        ]
+    )
+
+    result = await SemanticMappingAgent(registry, provider).map_document(
+        _document(block)
+    )
+
+    assert result.mapped[0].source_block_id == "block_0001"
+    assert len(provider.prompts) == 2
+    assert "SOURCE_BLOCK_MISMATCH" in provider.prompts[1]
+    assert "using facts only from INPUT.raw_block" in provider.prompts[1]
+    assert "Do not map document_structure" in provider.prompts[1]
+
+
+@pytest.mark.asyncio
 async def test_agent_returns_unmapped_without_calling_provider_when_no_candidates(
     registry: OntologyRegistry,
 ) -> None:
@@ -336,6 +435,24 @@ async def test_agent_retries_missing_pvt_parent_mapping(
         for candidate in prompt_candidates
     )
     assert prompt_candidates.index(oil_parent) < prompt_candidates.index(oil_pressure)
+
+
+@pytest.mark.asyncio
+async def test_agent_preserves_but_does_not_semantically_map_figure_blocks(
+    registry: OntologyRegistry,
+) -> None:
+    figure = RawBlock(
+        block_id="block_0001",
+        block_type="figure",
+        content={"figure_index": 1},
+        source_location="page 1, bbox (10, 20, 100, 80)",
+    )
+    provider = FakeProvider("must not be called")
+
+    batch = await SemanticMappingAgent(registry, provider).map_document(_document(figure))
+
+    assert batch.mappings == []
+    assert provider.calls == []
 
 
 @pytest.mark.asyncio

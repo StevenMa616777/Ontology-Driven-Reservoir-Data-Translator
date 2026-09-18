@@ -186,6 +186,7 @@ async def test_deepseek_provider_accepts_one_json_markdown_fence() -> None:
     assert traces[0].outcome == "accepted_after_local_correction"
     assert traces[0].local_correction == "markdown_fence_removed"
     assert traces[0].avoided_network_retry is True
+    assert traces[0].validated_output == result.model_dump(mode="json")
 
 
 @pytest.mark.asyncio
@@ -261,6 +262,8 @@ async def test_deepseek_provider_does_not_choose_between_multiple_json_values() 
     assert calls == 2
     assert traces[0].outcome == "output_invalid"
     assert traces[0].local_correction is None
+    assert traces[1].attempt_group_id == traces[0].attempt_group_id
+    assert traces[1].retry_of_call_id == traces[0].call_id
 
 
 @pytest.mark.asyncio
@@ -290,6 +293,11 @@ async def test_local_correction_is_not_counted_when_schema_validation_fails() ->
     assert calls == 2
     assert traces[0].outcome == "output_invalid"
     assert traces[0].error_code == "DEEPSEEK_SCHEMA_MISMATCH"
+    assert traces[0].error_details
+    assert traces[0].error_details[0]["location"] == ["mappings"]
+    assert traces[0].error_details[0]["type"] == "missing"
+    assert traces[0].error_details[0]["input"] == {"wrong_field": []}
+    assert "mappings" in (traces[0].error_message or "")
     assert traces[0].local_correction is None
     assert traces[0].avoided_network_retry is False
 

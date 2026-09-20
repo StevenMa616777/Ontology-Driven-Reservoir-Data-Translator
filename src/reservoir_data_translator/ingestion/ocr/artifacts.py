@@ -88,6 +88,9 @@ class OcrArtifactWriter:
         self.finished = False
         self.canvas = None
         self.source_canvas = None
+        self.clean_canvas = None
+        self.clean_source_canvas = None
+        self.comparison_pages: list[dict] = []
         self.raw = None
         self.artifact_id = str(uuid4())
         self.created_at = datetime.now().astimezone().isoformat()
@@ -101,7 +104,8 @@ class OcrArtifactWriter:
             while True:
                 self.name = base + (f"({number})" if number > 1 else "")
                 self.manifest = self.root / f"{self.name}.manifest.json"
-                if any((self.root / (self.name + suffix)).exists() for suffix in (".pdf", ".raw.json", ".pdf.tmp", ".raw.json.tmp")):
+                if any((self.root / (self.name + suffix)).exists() for suffix in
+                       (".pdf", ".raw.json", ".pdf.tmp", ".raw.json.tmp", ".clean.pdf", ".clean-source.pdf", ".comparison.json")):
                     number += 1
                     continue
                 try:
@@ -112,6 +116,9 @@ class OcrArtifactWriter:
                     number += 1
             self.pdf_path = self.root / f"{self.name}.pdf"
             self.source_pdf_path = self.root / f"{self.name}.source-regions.pdf"
+            self.clean_pdf_path = self.root / f"{self.name}.clean.pdf"
+            self.clean_source_path = self.root / f"{self.name}.clean-source.pdf"
+            self.comparison_path = self.root / f"{self.name}.comparison.json"
             self.raw_path = self.root / f"{self.name}.raw.json"
             self.raw = self.raw_path.with_suffix(".json.tmp").open("w", encoding="utf-8")
             self.raw.write('{\n  "pages": [\n')
@@ -133,13 +140,14 @@ class OcrArtifactWriter:
             self.raw.write("\n".join("    " + line for line in serialized.splitlines()))
             self.raw.flush()
             self.pages.append(page)
-            self._render(payload, image)
+            comparison_page = self._render(payload, image)
+            self.comparison_pages.append({"source_page": page, **comparison_page})
             self._write_manifest("writing")
         except Exception as exc:
             self.render_error = str(exc)
             raise self.failure(exc) from exc
 
-    def _render(self, payload: Mapping, image: Any) -> None:
+    def _render(self, payload: Mapping, image: Any) -> dict:
         if "parsing_res_list" not in payload and isinstance(payload.get("res"), Mapping):
             payload = payload["res"]
         from reportlab.pdfgen.canvas import Canvas
@@ -155,13 +163,19 @@ class OcrArtifactWriter:
             self.canvas.setTitle(self.source_name)
             self.source_canvas = Canvas(str(self.source_pdf_path.with_suffix(".pdf.tmp")), pagesize=(width, height))
             self.source_canvas.setTitle(f"{self.source_name} - OCR source regions")
+            self.clean_canvas = Canvas(str(self.clean_pdf_path.with_suffix(".pdf.tmp")), pagesize=(width, height))
+            self.clean_source_canvas = Canvas(str(self.clean_source_path.with_suffix(".pdf.tmp")), pagesize=(width, height))
         pdf = self.canvas
         pdf.setPageSize((width, height))
         self.source_canvas.setPageSize((width, height))
+        self.clean_canvas.setPageSize((width, height))
+        self.clean_source_canvas.setPageSize((width, height))
         self.source_canvas.drawImage(ImageReader(image), 0, 0, width, height)
+        self.clean_source_canvas.drawImage(ImageReader(image), 0, 0, width, height)
         style = ParagraphStyle("ocr", fontName=preview_font(), fontSize=10, leading=12, wordWrap="CJK", spaceAfter=0, spaceBefore=0)
         tables = payload.get("table_res_list") or []
         boxes = []
+        regions = []
         for index, region in enumerate(payload.get("parsing_res_list", []), 1):
             box = region.get("block_bbox")
             if box is None or len(box) != 4:
@@ -175,12 +189,15 @@ class OcrArtifactWriter:
             if w <= 0 or h <= 0:
                 continue
             boxes.append((index, str(region.get("block_label") or "unknown"), x, y, w, h))
+            regions.append({"number": f"R{index}", "type": str(region.get("block_label") or "unknown"),
+                            "bbox": [x, top * scale, x + w, bottom * scale]})
             label = str(region.get("block_label", "text")).lower()
             content = str(region.get("block_content") or "")
             if label in {"image", "figure", "chart", "diagram", "picture", "seal"}:
                 crop = image.crop((max(0, x0), max(0, top), min(image.width, x1), min(image.height, bottom)))
                 try:
-                    pdf.drawImage(ImageReader(crop), x, y, w, h)
+                    for target in (pdf, self.clean_canvas):
+                        target.drawImage(ImageReader(crop), x, y, w, h)
                 finally:
                     crop.close()
                 continue
@@ -218,11 +235,12 @@ class OcrArtifactWriter:
                 flowable = Paragraph(escape(content).replace("\n", "<br/>"), style)
             fw, fh = flowable.wrap(w, 100000)
             factor = min(1, w/max(fw, 1), h/max(fh, 1))
-            pdf.saveState()
-            pdf.translate(x, y+h-fh*factor)
-            pdf.scale(factor, factor)
-            flowable.drawOn(pdf, 0, 0)
-            pdf.restoreState()
+            for target in (pdf, self.clean_canvas):
+                target.saveState()
+                target.translate(x, y+h-fh*factor)
+                target.scale(factor, factor)
+                flowable.drawOn(target, 0, 0)
+                target.restoreState()
         # Overlay after all content so images and tables cannot hide the outlines.
         for target in (pdf, self.source_canvas):
             target.saveState()
@@ -243,6 +261,9 @@ class OcrArtifactWriter:
                 target.drawString(tag_x, tag_y, tag)
             target.restoreState()
             target.showPage()
+        self.clean_canvas.showPage()
+        self.clean_source_canvas.showPage()
+        return {"width": width, "height": height, "regions": regions}
 
     def _write_manifest(self, status: str, error: str | None = None) -> dict:
         reference = {"artifact_id": self.artifact_id, "file_name": self.pdf_path.name, "local_path": str(self.pdf_path), "status": status, "completed_pages": list(self.pages), "total_pages": self.total_pages, "created_at": self.created_at, "source_file_name": self.source_name, "preview_url": f"/ocr-intermediates/{self.artifact_id}/pdf", "download_url": f"/ocr-intermediates/{self.artifact_id}/pdf?download=true", "raw_url": f"/ocr-intermediates/{self.artifact_id}/raw", "error": error}
@@ -273,12 +294,17 @@ class OcrArtifactWriter:
             if self.canvas and not self.render_error:
                 self.canvas.save()
                 self.source_canvas.save()
+                self.clean_canvas.save()
+                self.clean_source_canvas.save()
                 import pdfplumber
-                for path in (self.pdf_path, self.source_pdf_path):
+                for path in (self.pdf_path, self.source_pdf_path, self.clean_pdf_path, self.clean_source_path):
                     with pdfplumber.open(path.with_suffix(".pdf.tmp")) as check:
                         if len(check.pages) != len(self.pages):
                             raise ValueError("OCR preview page count mismatch")
                     path.with_suffix(".pdf.tmp").replace(path)
+                temp = self.comparison_path.with_suffix(".json.tmp")
+                temp.write_text(json.dumps({"pages": self.comparison_pages}, ensure_ascii=False), encoding="utf-8")
+                temp.replace(self.comparison_path)
             status = "failed" if self.render_error or not self.pages else "partial" if error or len(self.pages) != self.total_pages else "complete"
             reference = self._write_manifest(status, self.render_error or error)
             publish(stage="ocr_artifact", ocr_intermediate=reference)

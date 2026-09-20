@@ -1,6 +1,7 @@
 import base64
 from io import BytesIO
 import json
+from pathlib import Path
 
 import pytest
 from PIL import Image
@@ -424,6 +425,92 @@ def test_pdf_parser_can_reject_low_confidence_ocr(tmp_path) -> None:
         ).parse(path)
 
     assert error.value.code == "PDF_OCR_LOW_CONFIDENCE"
+
+
+def test_paddle_region_index_matches_preview_without_renumbering_block_id() -> None:
+    payload = {
+        "parsing_res_list": [
+            {"block_id": 0, "block_label": "text", "block_bbox": [0, 0, 90, 20],
+             "block_content": "ordinary text"},
+            {"block_id": 15, "block_label": "formula", "block_bbox": [0, 30, 90, 70],
+             "block_content": "badly recognized formula"},
+            {"block_id": 16, "block_label": "text", "block_bbox": [0, 80, 90, 100],
+             "block_content": "uncertain text"},
+        ],
+        "overall_ocr_res": {"rec_boxes": [[0, 0, 90, 20], [0, 30, 90, 70], [0, 80, 90, 100]],
+                            "rec_scores": [0.95, 0.40, 0.40]},
+    }
+    regions = PaddleOcrBackend(minimum_confidence=0.70)._regions(payload)
+    assert [region.region_id for region in regions] == ["0", "15", "16"]
+    assert [region.source_region_index for region in regions] == [1, 2, 3]
+    assert regions[1].confidence == pytest.approx(0.40)
+    assert regions[1].layout_label == "formula"
+    assert regions[1].quality_flags == ()
+    assert regions[2].quality_flags == ("LOW_TEXT_CONFIDENCE",)
+
+
+@pytest.mark.parametrize("confidence,flags", [(0.40, ("LOW_TEXT_CONFIDENCE",)), (None, ())])
+def test_formula_skips_text_confidence_gate_but_keeps_evidence(confidence, flags) -> None:
+    region = OcrRegion(region_id="15", region_type="text", layout_label="formula",
+                       bbox_pixels=(0, 0, 90, 30), reading_order=15, text="uncertain formula",
+                       confidence=confidence, quality_flags=flags, source_region_index=16)
+    page = OcrPageResult(page_number=8, image_width=100, image_height=100,
+                         regions=(region,), engine="fake-layout-ocr")
+    blocks = PdfParser(reject_low_confidence_ocr=True)._ocr_blocks(
+        page, page_width=100, page_height=100, path=Path("scan.pdf"))
+    assert blocks
+    assert blocks[0].extraction_evidence.confidence == confidence
+    assert "LOW_TEXT_CONFIDENCE" not in blocks[0].extraction_evidence.quality_flags
+    assert "OCR_CONFIDENCE_UNAVAILABLE" not in blocks[0].extraction_evidence.quality_flags
+    assert blocks[0].parts[0].region_id == "15"
+
+
+def test_low_confidence_error_names_visible_region_number() -> None:
+    region = OcrRegion(region_id="15", region_type="text", layout_label="text",
+                       bbox_pixels=(0, 0, 90, 30), reading_order=15, text="uncertain text",
+                       confidence=0.40, quality_flags=("LOW_TEXT_CONFIDENCE",),
+                       source_region_index=16)
+    page = OcrPageResult(page_number=8, image_width=100, image_height=100,
+                         regions=(region,), engine="fake-layout-ocr")
+    with pytest.raises(IngestionError) as error:
+        PdfParser(reject_low_confidence_ocr=True)._ocr_blocks(
+            page, page_width=100, page_height=100, path=Path("scan.pdf"))
+    assert error.value.code == "PDF_OCR_LOW_CONFIDENCE"
+    assert "page 8, region R16: LOW_TEXT_CONFIDENCE" in str(error.value)
+    assert region.region_id == "15"
+
+
+def test_visible_region_number_uses_raw_position_after_ignored_region() -> None:
+    payload = {"parsing_res_list": [
+        {"block_id": 0, "block_label": "header", "block_bbox": [0, 0, 90, 20],
+         "block_content": "header"},
+        {"block_id": 1, "block_label": "text", "block_bbox": [0, 30, 90, 60],
+         "block_content": "uncertain text"},
+    ], "overall_ocr_res": {"rec_boxes": [[0, 30, 90, 60]], "rec_scores": [0.40]}}
+    regions = PaddleOcrBackend(minimum_confidence=0.70)._regions(payload)
+    assert len(regions) == 1
+    assert regions[0].region_id == "1"
+    assert regions[0].source_region_index == 2
+    page = OcrPageResult(page_number=1, image_width=100, image_height=100,
+                         regions=tuple(regions), engine="fake-layout-ocr")
+    with pytest.raises(IngestionError) as error:
+        PdfParser(reject_low_confidence_ocr=True)._ocr_blocks(
+            page, page_width=100, page_height=100, path=Path("scan.pdf"))
+    assert "region R2: LOW_TEXT_CONFIDENCE" in str(error.value)
+
+
+def test_low_confidence_table_still_requires_review() -> None:
+    region = OcrRegion(region_id="2", region_type="table", layout_label="table",
+                       bbox_pixels=(0, 0, 90, 30), reading_order=2,
+                       table=OcrTable(columns=["Pressure"], rows=[["100"]]),
+                       confidence=0.40, quality_flags=("TABLE_CELL_LOW_CONFIDENCE",),
+                       source_region_index=3)
+    page = OcrPageResult(page_number=1, image_width=100, image_height=100,
+                         regions=(region,), engine="fake-layout-ocr")
+    with pytest.raises(IngestionError) as error:
+        PdfParser(reject_low_confidence_ocr=True)._ocr_blocks(
+            page, page_width=100, page_height=100, path=Path("scan.pdf"))
+    assert "region R3: TABLE_CELL_LOW_CONFIDENCE" in str(error.value)
 
 
 def test_pdf_parser_translates_backend_failure_to_ingestion_error(tmp_path) -> None:

@@ -241,7 +241,7 @@ function renderOcrIntermediate(artifact) {
     <p>${escapeHtml(artifact.file_name)} · 已识别 ${artifact.completed_pages.length} / ${artifact.total_pages} 页</p>
     <p class="ocr-local-path">已保存到本地：${escapeHtml(artifact.local_path)}</p>
     ${available ? `<div class="ocr-actions"><button type="button" class="button" data-ocr-original>浏览原始文件</button><a class="button" href="${escapeHtml(artifact.download_url)}">下载 OCR 中间结果</a><a href="${escapeHtml(artifact.raw_url)}" target="_blank" rel="noopener">下载原始 OCR JSON</a></div>
-    ${artifact.comparison_url ? `<details class="ocr-preview" data-ocr-comparison><summary>对照浏览源文件与 OCR 中间结果</summary><div data-ocr-comparison-body></div></details><p>红框标注 OCR block_bbox 和原始 block_label；相同 R 编号对应相同区域。左右两栏同步滚动、缩放和翻页。</p>` : `<details class="ocr-preview"><summary>浏览 OCR 中间结果</summary><iframe title="OCR 原始识别结果 PDF" data-src="${escapeHtml(artifact.preview_url)}"></iframe></details>`}
+    ${artifact.comparison_url ? `<details class="ocr-preview" data-ocr-comparison><summary>对照浏览源文件与 OCR 中间结果</summary><div data-ocr-comparison-body></div></details><p data-ocr-hint>红框对应 OCR block_bbox；页面外的 R 编号和类型对应原始识别区域。左右两栏同步滚动、缩放和翻页。</p>` : `<details class="ocr-preview"><summary>浏览 OCR 中间结果</summary><iframe title="OCR 原始识别结果 PDF" data-src="${escapeHtml(artifact.preview_url)}"></iframe></details>`}
     ${artifact.source_regions_download_url ? `<a class="button" href="${escapeHtml(artifact.source_regions_download_url)}">下载源文件 OCR 区域红框</a>` : ""}` : `<p>中间 PDF 未能生成。${escapeHtml(artifact.error || "请检查服务日志。")}</p><a href="${escapeHtml(artifact.raw_url)}" target="_blank" rel="noopener">下载已保存的 OCR JSON</a>`}
     <p>内容来自 OCR 输出，未经切片、语义映射或数字纠正。${partial ? `已完成原文页：${escapeHtml(artifact.completed_pages.join("、"))}；其余页面未完成。` : ""}</p>`;
   panel.querySelector("[data-ocr-original]")?.addEventListener("click", () => openLocalFile(state.translationFile));
@@ -258,16 +258,116 @@ function renderOcrIntermediate(artifact) {
   }));
 }
 
+function drawOcrComparisonPage(figure, page, width, zoom, visible, interactive) {
+  const image = figure.querySelector("img");
+  const svg = figure.querySelector("svg");
+  const tags = figure.querySelector(".ocr-region-tags");
+  svg.replaceChildren();
+  tags.replaceChildren();
+  const regions = interactive ? (page.regions || []).filter(region =>
+    Array.isArray(region.bbox) && region.bbox.length === 4 &&
+    region.bbox.every(Number.isFinite) && region.bbox[2] > region.bbox[0] &&
+    region.bbox[3] > region.bbox[1]) : [];
+  const showTags = visible.number || visible.type;
+  const routes = [];
+  if (showTags) {
+    [...regions].sort((a, b) => a.bbox[1] - b.bbox[1]).forEach(region => {
+      routes.push({ region, ...OcrComparisonLayout.chooseOcrLeader(
+        region, regions, page.width, routes) });
+    });
+  }
+  const railWidth = 136 * zoom;
+  const leftRail = routes.some(route => route.side === "left") ? railWidth : 0;
+  const rightRail = routes.some(route => route.side === "right") ? railWidth : 0;
+  const imageWidth = Math.max(100, width - leftRail - rightRail);
+  const scale = imageWidth / page.width;
+  const imageHeight = page.height * scale;
+  const maxCount = Math.max(routes.filter(route => route.side === "left").length,
+    routes.filter(route => route.side === "right").length, 1);
+  const tagHeight = Math.max(16 * zoom, Math.min(25 * zoom, imageHeight / maxCount - 3 * zoom));
+  const gap = 3 * zoom;
+  routes.forEach(route => { route.anchor = route.y * scale; });
+  const height = Math.max(OcrComparisonLayout.positionOcrTags(routes, "left", imageHeight, tagHeight, gap),
+    OcrComparisonLayout.positionOcrTags(routes, "right", imageHeight, tagHeight, gap));
+  OcrComparisonLayout.assignOcrLeaderLanes(routes, "left", tagHeight, zoom);
+  OcrComparisonLayout.assignOcrLeaderLanes(routes, "right", tagHeight, zoom);
+  const stageWidth = leftRail + imageWidth + rightRail;
+  figure.style.width = `${stageWidth}px`;
+  figure.style.height = `${height}px`;
+  image.style.left = `${leftRail}px`;
+  image.style.width = `${imageWidth}px`;
+  image.style.height = `${imageHeight}px`;
+  svg.setAttribute("viewBox", `0 0 ${stageWidth} ${height}`);
+  svg.style.width = `${stageWidth}px`;
+  svg.style.height = `${height}px`;
+  const svgNs = "http://www.w3.org/2000/svg";
+  function addSvg(name, attributes) {
+    const element = document.createElementNS(svgNs, name);
+    Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, String(value)));
+    svg.append(element);
+  }
+  if (visible.boundary) {
+    regions.forEach(region => {
+      const [x0, top, x1, bottom] = region.bbox;
+      addSvg("rect", { x: leftRail + x0 * scale, y: top * scale,
+        width: (x1 - x0) * scale, height: (bottom - top) * scale,
+        class: "ocr-region-outline" });
+    });
+  }
+  routes.forEach(route => {
+    const [x0, , x1] = route.region.bbox;
+    const left = route.side === "left";
+    const tagX = left ? 0 : leftRail + imageWidth + 36 * zoom;
+    const tagWidth = railWidth - 36 * zoom;
+    const startX = left ? tagX + tagWidth : tagX;
+    const laneOffset = (5 + route.lane * 6) * zoom;
+    const bendX = left ? leftRail - laneOffset : leftRail + imageWidth + laneOffset;
+    const endX = left ? leftRail + x0 * scale : leftRail + x1 * scale;
+    addSvg("path", { d: `M ${startX} ${route.tagY + tagHeight / 2} H ${bendX} V ${route.anchor} H ${endX}`,
+      class: "ocr-region-leader" });
+    const tag = document.createElement("div");
+    tag.className = "ocr-region-tag";
+    tag.style.left = `${tagX}px`;
+    tag.style.top = `${route.tagY}px`;
+    tag.style.width = `${tagWidth}px`;
+    tag.style.height = `${tagHeight}px`;
+    tag.style.fontSize = `${Math.min(13, Math.max(9, tagHeight / zoom - 7)) * zoom}px`;
+    tag.title = `${route.region.number} · ${route.region.type}`;
+    if (visible.number) {
+      const number = document.createElement("span");
+      number.textContent = route.region.number;
+      tag.append(number);
+    }
+    if (visible.number && visible.type) {
+      const separator = document.createElement("span");
+      separator.textContent = " · ";
+      tag.append(separator);
+    }
+    if (visible.type) {
+      const type = document.createElement("span");
+      type.textContent = route.region.type;
+      tag.append(type);
+    }
+    tags.append(tag);
+  });
+}
+
 async function loadOcrComparison(details, artifact) {
   const body = details.querySelector("[data-ocr-comparison-body]");
   body.textContent = "正在加载对照视图…";
   const data = await getJson(artifact.comparison_url);
   if (!details.isConnected) return;
-  body.innerHTML = `<div class="ocr-compare-toolbar"><button type="button" data-zoom-out aria-label="缩小两栏">−</button><span data-zoom-label>100%</span><button type="button" data-zoom-in aria-label="放大两栏">+</button><button type="button" data-zoom-reset>适合宽度</button><label>原文页 <select data-compare-page>${data.pages.map((page, i) => `<option value="${i}">${escapeHtml(artifact.completed_pages[i] ?? page.index)}</option>`).join("")}</select></label><span>滚动 / Ctrl + 滚轮缩放，两栏同步</span></div><div class="ocr-compare-columns">${["source", "result"].map(kind => `<section><h3>${kind === "source" ? "源文件 · OCR 区域" : "OCR 中间结果 · 识别区域"}</h3><div class="ocr-compare-scroll" tabindex="0" aria-label="${kind === "source" ? "源文件" : "OCR 结果"}同步浏览"><div class="ocr-compare-pages">${data.pages.map((page, i) => `<figure data-page-index="${i}" style="aspect-ratio:${page.width} / ${page.height}"><img loading="lazy" src="${escapeHtml(page[kind + "_url"])}" width="${page.width}" height="${page.height}" alt="原文第 ${escapeHtml(artifact.completed_pages[i] ?? page.index)} 页${kind === "source" ? "源文件" : "OCR 结果"}"></figure>`).join("")}</div></div></section>`).join("")}</div>`;
+  if (!data.interactive) {
+    details.parentElement.querySelector("[data-ocr-hint]").textContent =
+      "旧产物的红框与标签已经画入 PDF，仍按原样显示；左右两栏同步滚动、缩放和翻页。";
+  }
+  const sourcePage = (page, index) => data.interactive ? page.source_page : (artifact.completed_pages[index] ?? page.index);
+  body.innerHTML = `<div class="ocr-compare-toolbar"><button type="button" data-zoom-out aria-label="缩小两栏">−</button><span data-zoom-label>100%</span><button type="button" data-zoom-in aria-label="放大两栏">+</button><button type="button" data-zoom-reset>适合宽度</button><label>原文页 <select data-compare-page>${data.pages.map((page, i) => `<option value="${i}">${escapeHtml(sourcePage(page, i))}</option>`).join("")}</select></label>${data.interactive ? `<fieldset class="ocr-visibility"><legend>标注</legend><label><input type="checkbox" data-ocr-visible="boundary" checked>显示边界</label><label><input type="checkbox" data-ocr-visible="number" checked>显示编号</label><label><input type="checkbox" data-ocr-visible="type" checked>显示类型</label></fieldset>` : ""}<span>滚动 / Ctrl + 滚轮缩放，两栏同步</span></div><div class="ocr-compare-columns">${["source", "result"].map(kind => `<section><h3>${kind === "source" ? "源文件 · OCR 区域" : "OCR 中间结果 · 识别区域"}</h3><div class="ocr-compare-scroll" tabindex="0" aria-label="${kind === "source" ? "源文件" : "OCR 结果"}同步浏览"><div class="ocr-compare-pages">${data.pages.map((page, i) => `<figure data-page-index="${i}"><img loading="lazy" src="${escapeHtml(page[kind + "_url"])}" width="${page.width}" height="${page.height}" alt="原文第 ${escapeHtml(sourcePage(page, i))} 页${kind === "source" ? "源文件" : "OCR 结果"}"><svg aria-hidden="true"></svg><div class="ocr-region-tags"></div></figure>`).join("")}</div></div></section>`).join("")}</div>`;
   const panes = [...body.querySelectorAll(".ocr-compare-scroll")];
   const pageSelect = body.querySelector("[data-compare-page]");
   let zoom = 1;
   let syncing = false;
+  const visible = { boundary: true, number: true, type: true };
   function syncScroll(from, to) {
     if (syncing) return;
     if (Math.abs(to.scrollTop - from.scrollTop) < 1 && Math.abs(to.scrollLeft - from.scrollLeft) < 1) return;
@@ -277,18 +377,33 @@ async function loadOcrComparison(details, artifact) {
     syncing = false;
   }
   function setZoom(value) {
-    const ratio = value / zoom;
-    const top = panes[0].scrollTop;
-    const left = panes[0].scrollLeft;
+    const firstFigure = [...panes[0].querySelectorAll("figure")].findLast(figure =>
+      figure.offsetTop <= panes[0].scrollTop + 16) || panes[0].querySelector("figure");
+    const pageIndex = Number(firstFigure.dataset.pageIndex);
+    const fraction = (panes[0].scrollTop - firstFigure.offsetTop) / Math.max(firstFigure.offsetHeight, 1);
+    const horizontal = panes[0].scrollLeft / Math.max(panes[0].scrollWidth, 1);
     zoom = value;
     const width = Math.max(100, Math.min(...panes.map(pane => pane.clientWidth)) - 24) * zoom;
+    syncing = true;
     panes.forEach(pane => {
       pane.querySelector(".ocr-compare-pages").style.width = `${width}px`;
-      pane.scrollTop = top * ratio;
-      pane.scrollLeft = left * ratio;
+      pane.querySelectorAll("figure").forEach((figure, index) =>
+        drawOcrComparisonPage(figure, data.pages[index], width, zoom, visible, data.interactive));
+      const selected = pane.querySelectorAll("figure")[pageIndex];
+      pane.scrollTop = selected.offsetTop + fraction * selected.offsetHeight;
+      pane.scrollLeft = horizontal * pane.scrollWidth;
     });
+    syncing = false;
     body.querySelector("[data-zoom-label]").textContent = `${Math.round(zoom * 100)}%`;
   }
+  body.querySelectorAll("[data-ocr-visible]").forEach(input => input.addEventListener("change", () => {
+    const key = input.dataset.ocrVisible;
+    Object.assign(visible, OcrComparisonLayout.updateOcrVisibility(visible, key, input.checked));
+    body.querySelectorAll("[data-ocr-visible]").forEach(control => {
+      control.checked = visible[control.dataset.ocrVisible];
+    });
+    setZoom(zoom);
+  }));
   panes.forEach((pane, i) => {
     pane.addEventListener("scroll", () => {
       syncScroll(pane, panes[1 - i]);

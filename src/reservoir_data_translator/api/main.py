@@ -75,7 +75,7 @@ from reservoir_data_translator.ingestion.ocr.artifacts import artifact_root, pro
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 UI_ROOT = Path(__file__).resolve().parent.parent / "ui"
 DEFAULT_TRACE_ROOT = PROJECT_ROOT / "artifacts" / "deepseek_traces"
-UI_VERSION = "ocr-preview-v6"
+UI_VERSION = "ocr-overlay-v8"
 
 
 class NoStoreStaticFiles(StaticFiles):
@@ -846,7 +846,7 @@ def create_app(
         return state
 
     def ocr_intermediate(artifact_id: UUID, kind: str, download: bool = False) -> Response:
-        if kind not in {"pdf", "raw", "source-regions"}:
+        if kind not in {"pdf", "raw", "source-regions", "clean", "clean-source"}:
             raise _http_error(404, "OCR_ARTIFACT_NOT_FOUND", "OCR 文件不存在。")
         root = (services.pdf_parser.ocr_artifact_dir if services and services.pdf_parser else None) or artifact_root()
         root = Path(root).resolve()
@@ -859,7 +859,8 @@ def create_app(
                 continue
             # Resolve only known local files, never client-provided filesystem paths.
             stem = manifest.name.removesuffix(".manifest.json")
-            suffix = {"pdf": ".pdf", "raw": ".raw.json", "source-regions": ".source-regions.pdf"}[kind]
+            suffix = {"pdf": ".pdf", "raw": ".raw.json", "source-regions": ".source-regions.pdf",
+                      "clean": ".clean.pdf", "clean-source": ".clean-source.pdf"}[kind]
             path = (root / (stem + suffix)).resolve()
             if path.parent != root or not path.is_file():
                 break
@@ -881,19 +882,33 @@ def create_app(
 
         result = ocr_intermediate(artifact_id, "pdf")
         source = ocr_intermediate(artifact_id, "source-regions")
+        result_path = Path(result.path)
+        comparison_path = result_path.with_name(result_path.name.removesuffix(".pdf") + ".comparison.json")
+        interactive = comparison_path.is_file()
+        if interactive:
+            try:
+                comparison_pages = json.loads(comparison_path.read_text(encoding="utf-8"))["pages"]
+                clean_result = ocr_intermediate(artifact_id, "clean")
+                clean_source = ocr_intermediate(artifact_id, "clean-source")
+                result, source = clean_result, clean_source
+            except (OSError, ValueError, KeyError, HTTPException):
+                interactive = False
         with pdfplumber.open(result.path) as pdf, pdfplumber.open(source.path) as original:
-            if len(pdf.pages) != len(original.pages):
+            if len(pdf.pages) != len(original.pages) or (interactive and len(pdf.pages) != len(comparison_pages)):
                 raise _http_error(409, "OCR_COMPARISON_PAGE_MISMATCH", "两份 PDF 页数不一致。")
-            return {"pages": [{"index": i, "width": page.width, "height": page.height,
-                               "source_url": f"/ocr-intermediates/{artifact_id}/source-regions/pages/{i}",
-                               "result_url": f"/ocr-intermediates/{artifact_id}/pdf/pages/{i}"}
-                              for i, page in enumerate(pdf.pages, 1)]}
+            return {"interactive": interactive, "pages": [
+                {"index": i, "width": page.width, "height": page.height,
+                 "source_url": f"/ocr-intermediates/{artifact_id}/{'clean-source' if interactive else 'source-regions'}/pages/{i}",
+                 "result_url": f"/ocr-intermediates/{artifact_id}/{'clean' if interactive else 'pdf'}/pages/{i}",
+                 "regions": comparison_pages[i - 1]["regions"] if interactive else [],
+                 "source_page": comparison_pages[i - 1]["source_page"] if interactive else i}
+                for i, page in enumerate(pdf.pages, 1)]}
 
     @api.get("/ocr-intermediates/{artifact_id}/{kind}/pages/{page_number}")
     def ocr_comparison_page(artifact_id: UUID, kind: str, page_number: int) -> Response:
         import pdfplumber
 
-        if kind not in {"pdf", "source-regions"}:
+        if kind not in {"pdf", "source-regions", "clean", "clean-source"}:
             raise _http_error(404, "OCR_ARTIFACT_NOT_FOUND", "OCR 文件不存在。")
         artifact = ocr_intermediate(artifact_id, kind)
         with _ocr_render_lock, pdfplumber.open(artifact.path) as pdf:

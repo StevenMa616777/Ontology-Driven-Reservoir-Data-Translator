@@ -530,6 +530,8 @@ class PdfParser(DocumentParser):
         pending: list[_PendingBlock] = []
         figure_index = 0
         for region_index, region in enumerate(result.regions, start=1):
+            display_region = f"R{region.source_region_index or region_index}"
+            is_formula = region.layout_label.casefold() == "formula"
             bbox = self._ocr_bbox_to_pdf(
                 region,
                 image_width=result.image_width,
@@ -544,20 +546,21 @@ class PdfParser(DocumentParser):
                     region.confidence,
                     path=path,
                     page=result.page_number,
-                    region_id=region.region_id,
+                    display_region=display_region,
                 )
                 if region.confidence is not None
                 else None
             )
-            review_flags = list(region.quality_flags)
-            if region.region_type in {"text", "table"} and confidence is None:
+            review_flags = [flag for flag in region.quality_flags
+                            if not (is_formula and flag in {"LOW_TEXT_CONFIDENCE", "OCR_CONFIDENCE_UNAVAILABLE"})]
+            if not is_formula and region.region_type in {"text", "table"} and confidence is None:
                 review_flags.append("OCR_CONFIDENCE_UNAVAILABLE")
             if self.reject_low_confidence_ocr and review_flags:
                 raise IngestionError(
                     "PDF_OCR_LOW_CONFIDENCE",
                     (
                         f"OCR confidence requires review on page {result.page_number}, "
-                        f"region {region.region_id}: {', '.join(review_flags)}."
+                        f"region {display_region}: {', '.join(review_flags)}."
                     ),
                     path=path,
                 )
@@ -608,7 +611,7 @@ class PdfParser(DocumentParser):
                 if region.table is None:
                     raise IngestionError(
                         "PDF_OCR_OUTPUT_INVALID",
-                        f"OCR table region {region.region_id} has no table structure.",
+                        f"OCR table region {display_region} has no table structure.",
                         path=path,
                     )
                 if not region.table.columns or any(
@@ -618,7 +621,7 @@ class PdfParser(DocumentParser):
                     raise IngestionError(
                         "PDF_OCR_OUTPUT_INVALID",
                         (
-                            f"OCR table region {region.region_id} does not satisfy "
+                            f"OCR table region {display_region} does not satisfy "
                             "the columns/rows contract."
                         ),
                         path=path,
@@ -896,7 +899,7 @@ class PdfParser(DocumentParser):
         *,
         path: Path,
         page: int,
-        region_id: str,
+        display_region: str,
     ) -> float:
         confidence = float(value)
         if not math.isfinite(confidence):
@@ -904,7 +907,7 @@ class PdfParser(DocumentParser):
                 "PDF_OCR_OUTPUT_INVALID",
                 (
                     f"OCR returned a non-finite confidence on page {page}, "
-                    f"region {region_id}."
+                    f"region {display_region}."
                 ),
                 path=path,
             )

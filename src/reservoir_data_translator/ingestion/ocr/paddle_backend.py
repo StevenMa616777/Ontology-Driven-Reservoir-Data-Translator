@@ -271,10 +271,11 @@ class PaddleOcrBackend:
             if bbox is None:
                 raise OcrBackendError(
                     "PDF_OCR_OUTPUT_INVALID",
-                    f"PaddleOCR region {fallback_order} has no valid bounding box.",
+                    f"PaddleOCR region R{fallback_order} has no valid bounding box.",
                 )
             order = self._positive_dimension(raw_region.get("block_order"), fallback_order)
-            region_id = str(raw_region.get("block_id") or fallback_order)
+            raw_id = raw_region.get("block_id")
+            region_id = str(raw_id) if raw_id is not None else str(fallback_order - 1)
             confidence = self._region_confidence(overall_ocr, bbox)
             quality_flags: list[str] = []
 
@@ -298,6 +299,7 @@ class PaddleOcrBackend:
                         table=table,
                         confidence=confidence,
                         quality_flags=tuple(quality_flags),
+                        source_region_index=fallback_order,
                     )
                 )
                 continue
@@ -312,12 +314,13 @@ class PaddleOcrBackend:
                         bbox_pixels=bbox,
                         reading_order=order,
                         confidence=confidence,
+                        source_region_index=fallback_order,
                     )
                 )
                 continue
             if not content:
                 continue
-            if confidence is not None and confidence < self.minimum_confidence:
+            if label != "formula" and confidence is not None and confidence < self.minimum_confidence:
                 quality_flags.append("LOW_TEXT_CONFIDENCE")
             regions.append(
                 OcrRegion(
@@ -329,6 +332,7 @@ class PaddleOcrBackend:
                     text=content,
                     confidence=confidence,
                     quality_flags=tuple(quality_flags),
+                    source_region_index=fallback_order,
                 )
             )
         return regions

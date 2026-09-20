@@ -28,6 +28,7 @@ class OcrRegion:
     table: OcrTable | None = None
     confidence: float | None = None
     quality_flags: tuple[str, ...] = ()
+    source_region_index: int | None = None  # One-based position in the raw page, matching the R label.
 
 
 @dataclass(frozen=True)

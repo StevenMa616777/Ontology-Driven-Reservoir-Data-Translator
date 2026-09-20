@@ -115,6 +115,20 @@ def test_source_and_result_have_matching_pixel_bbox_overlays(tmp_path, dpi):
             rectangles.append(coordinates)
             assert len(page.images) == (1 if path == writer.source_pdf_path else 0)
     assert rectangles[0] == rectangles[1]
+    comparison = json.loads(writer.comparison_path.read_text(encoding="utf-8"))
+    assert len(comparison["pages"]) == 1
+    recorded = comparison["pages"][0]
+    assert recorded["source_page"] == 1
+    assert (recorded["width"], recorded["height"]) == pytest.approx((400 * 72 / dpi, 500 * 72 / dpi))
+    assert recorded["regions"][0]["number"] == "R1"
+    assert recorded["regions"][0]["type"] == "text"
+    assert recorded["regions"][0]["bbox"] == pytest.approx([v * 72 / dpi for v in (30, 30, 360, 60)])
+    for path in (writer.clean_pdf_path, writer.clean_source_path):
+        with pdfplumber.open(path) as pdf:
+            page = pdf.pages[0]
+            assert "R1" not in (page.extract_text() or "")
+            assert not [r for r in page.rects if r["stroke"] and r["stroking_color"] == (1, 0, 0)]
+            assert len(page.images) == (1 if path == writer.clean_source_path else 0)
 
 
 def test_existing_pdf_without_manifest_is_not_overwritten(tmp_path):
@@ -262,7 +276,13 @@ async def test_preview_available_while_semantic_running_and_after_failure(regist
             comparison = await client.get(artifact["comparison_url"])
             assert comparison.status_code == 200
             pages = comparison.json()["pages"]
+            assert comparison.json()["interactive"] is True
             assert len(pages) == 1
+            assert pages[0]["source_page"] == 1
+            assert pages[0]["regions"][0] == {"number": "R1", "type": "text",
+                                              "bbox": [30, 30, 360, 60]}
+            assert "/clean-source/pages/" in pages[0]["source_url"]
+            assert "/clean/pages/" in pages[0]["result_url"]
             for key in ("source_url", "result_url"):
                 image = await client.get(pages[0][key])
                 assert image.status_code == 200
@@ -271,6 +291,10 @@ async def test_preview_available_while_semantic_running_and_after_failure(regist
                     assert rendered.size == (800, 1000)
             assert (await client.get(pages[0]["result_url"].removesuffix("1") + "0")).status_code == 404
             assert (await client.get(pages[0]["result_url"].removesuffix("1") + "2")).status_code == 404
+            next(root.glob("*.comparison.json")).unlink()
+            legacy = (await client.get(artifact["comparison_url"])).json()
+            assert legacy["interactive"] is False
+            assert "/source-regions/pages/" in legacy["pages"][0]["source_url"]
             raw = await client.get(artifact["raw_url"])
             assert raw.text.startswith('{\n  "pages": [\n')
             assert raw.headers["content-disposition"].startswith("attachment")

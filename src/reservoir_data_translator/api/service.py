@@ -74,7 +74,7 @@ class PipelineServices:
             mapping.source_system.casefold(): mapping for mapping in source_mappings
         }
 
-    def ingest(self, source: SourceInput | str) -> RawDocument:
+    def ingest(self, source: SourceInput | str, *, review_ocr: bool = False) -> RawDocument:
         source_input = (
             SourceInput(content=source, file_name="source.txt")
             if isinstance(source, str)
@@ -110,6 +110,7 @@ class PipelineServices:
                 document = self.pdf_parser.parse(
                     temporary_path,
                     source_id=source_input.source_id or file_name,
+                    review_ocr=review_ocr,
                 )
             else:
                 document = parse_document(

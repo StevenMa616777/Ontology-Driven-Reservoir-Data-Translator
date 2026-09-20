@@ -421,6 +421,107 @@ async def test_ingest_accepts_base64_scanned_pdf_with_configured_ocr(
 
 
 @pytest.mark.asyncio
+async def test_ocr_review_job_stops_or_continues_only_after_region_decisions(
+    registry: OntologyRegistry, tmp_path,
+) -> None:
+    from reservoir_data_translator.ingestion.ocr.artifacts import active_artifact
+
+    class Backend:
+        def analyze_page(self, image, *, page_number: int, languages: tuple[str, ...]) -> OcrPageResult:
+            width, height = image.size
+            boxes = [(10, 10, 200, 50), (10, 60, width - 10, 120)]
+            contents = ["unreliable text", "A15井采用定液生产制度，日产液控制在500方，井底流压不得低于80 bar。"]
+            writer = active_artifact.get()
+            writer.record(page_number, {"parsing_res_list": [
+                {"block_id": index, "block_label": "text", "block_bbox": box,
+                 "block_content": contents[index]}
+                for index, box in enumerate(boxes)
+            ]}, image)
+            return OcrPageResult(
+                page_number=page_number, image_width=width, image_height=height,
+                engine="review-fixture", regions=tuple(
+                    OcrRegion(region_id=str(index), region_type="text", layout_label="text",
+                              bbox_pixels=box, reading_order=index + 1,
+                              text=contents[index], raw_content=contents[index],
+                              confidence=0.4 if index == 0 else 0.98,
+                              quality_flags=("LOW_TEXT_CONFIDENCE",) if index == 0 else (),
+                              source_region_index=index + 1)
+                    for index, box in enumerate(boxes)
+                ),
+            )
+
+    page_image = BytesIO()
+    Image.new("RGB", (100, 100), "white").save(page_image, format="PNG")
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=letter)
+    pdf.drawImage(ImageReader(BytesIO(page_image.getvalue())), 0, 0,
+                  width=letter[0], height=letter[1])
+    pdf.save()
+    request = {"source": {"file_name": "review.pdf", "content_encoding": "base64",
+                          "content": base64.b64encode(buffer.getvalue()).decode("ascii")},
+               "source_system": "client_c", "target_platform": "cmg"}
+    provider = APIWellProvider()
+    provider.calls = 0
+    client = _configured_client(registry, provider, pdf_parser=PdfParser(
+        ocr_backend=Backend(), ocr_render_dpi=72, ocr_artifact_dir=tmp_path,
+    ))
+
+    async def start_review():
+        submitted = await client.post("/translation-jobs", json=request)
+        assert submitted.status_code == 202
+        url = submitted.json()["status_url"]
+        for _ in range(150):
+            job = (await client.get(url)).json()
+            if job["status"] == "ocr_review_required":
+                return url, job
+            await asyncio.sleep(0.01)
+        pytest.fail(f"OCR review was not reached: {job}")
+
+    first_url, first = await start_review()
+    assert provider.calls == 0
+    item = first["ocr_review"]["items"][0]
+    assert (item["page"], item["number"], item["label"], item["block_id"]) == (1, "R1", "text", "0")
+    assert item["raw_content"] == "unreliable text"
+    assert item["recognized_content"] == "unreliable text"
+    assert item["source_image_url"]
+    assert (await client.get(item["source_image_url"])).headers["content-type"] == "image/png"
+    incomplete = await client.post(first_url + "/ocr-review", json={"action": "continue"})
+    assert incomplete.status_code == 422
+    stopped = await client.post(first_url + "/ocr-review", json={"action": "stop"})
+    assert stopped.status_code == 200
+    assert (await client.get(first_url)).json()["status"] == "stopped"
+    assert provider.calls == 0
+
+    second_url, second = await start_review()
+    issue_id = second["ocr_review"]["items"][0]["issue_id"]
+    continued = await client.post(second_url + "/ocr-review", json={
+        "action": "continue", "decisions": {issue_id: "exclude"},
+    })
+    assert continued.status_code == 200
+    for _ in range(150):
+        resumed = (await client.get(second_url)).json()
+        if resumed["status"] in {"completed", "failed"}:
+            break
+        await asyncio.sleep(0.01)
+    assert resumed["status"] == "completed", resumed.get("error")
+    assert resumed["result"]["status"] == "partial"
+    assert resumed["result"]["ocr_review"]["excluded_count"] == 1
+    saved_review = await client.get(resumed["ocr_intermediate"]["review_url"])
+    assert saved_review.status_code == 200
+    assert saved_review.json()["decisions"] == {issue_id: "exclude"}
+    assert all("unreliable text" not in str(block["content"])
+               for block in resumed["result"]["source"]["blocks"])
+    assert provider.calls > 0
+    audits = [json.loads(path.read_text(encoding="utf-8"))
+              for path in tmp_path.glob("*.review.json")]
+    assert {audit["action"] for audit in audits} == {"stop", "continue"}
+    assert next(audit for audit in audits if audit["action"] == "continue")["decisions"] == {
+        issue_id: "exclude",
+    }
+    await client.aclose()
+
+
+@pytest.mark.asyncio
 async def test_ingest_automatically_ocrs_restricted_pdf(
     registry: OntologyRegistry,
 ) -> None:

@@ -158,15 +158,15 @@ def test_paddle_raw_wrapper_is_kept_before_normalization(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_synchronous_api_preserves_artifact_on_low_confidence(registry, tmp_path):
+async def test_synchronous_api_directs_ocr_review_to_job_and_preserves_artifact(registry, tmp_path):
     parser = PdfParser(ocr_backend=backend_for(raw_page(score=0.1)), ocr_render_dpi=72, ocr_artifact_dir=tmp_path)
     app = create_app(registry=registry, pdf_parser=parser)
     body = {"source": {"file_name": "low.pdf", "content": base64.b64encode(scan_bytes()).decode(), "content_encoding": "base64"}, "target_platform": "eclipse"}
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post("/translate", json=body)
-        assert response.status_code == 422
+        assert response.status_code == 409
         detail = response.json()["detail"]
-        assert detail["code"] == "PDF_OCR_LOW_CONFIDENCE"
+        assert detail["code"] == "OCR_REVIEW_REQUIRES_JOB"
         artifact = detail["ocr_intermediate"]
         assert artifact["status"] == "complete"
         assert (await client.get(artifact["preview_url"])).status_code == 200

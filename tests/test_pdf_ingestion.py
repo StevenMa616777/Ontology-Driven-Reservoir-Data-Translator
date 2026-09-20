@@ -1,4 +1,5 @@
 import base64
+from dataclasses import replace
 from io import BytesIO
 import json
 from pathlib import Path
@@ -16,6 +17,7 @@ from reservoir_data_translator.ingestion import (
     OcrBackendError,
     OcrPageResult,
     OcrRegion,
+    OcrReviewRequired,
     OcrTable,
     PaddleOcrBackend,
     PdfParser,
@@ -425,6 +427,55 @@ def test_pdf_parser_can_reject_low_confidence_ocr(tmp_path) -> None:
         ).parse(path)
 
     assert error.value.code == "PDF_OCR_LOW_CONFIDENCE"
+
+
+def test_pdf_ocr_review_decisions_are_applied_before_chunking(tmp_path) -> None:
+    path = tmp_path / "scan.pdf"
+    _image_only_pdf(path)
+    parser = PdfParser(
+        ocr_backend=_FakeOcrBackend(low_confidence=True),
+        ocr_render_dpi=72, ocr_artifact_dir=tmp_path / "artifacts",
+    )
+
+    with pytest.raises(OcrReviewRequired) as pending:
+        parser.parse(path, review_ocr=True)
+
+    session = pending.value.session
+    assert len(session.issues) == 1
+    issue = session.issues[0]
+    assert (issue.page, issue.number, issue.block_id, issue.label) == (1, "R1", "title", "text")
+    assert issue.flags == ("LOW_TEXT_CONFIDENCE",)
+    assert issue.recognized_content == "Minimum bottom-hole pressure is 80 bar."
+    with pytest.raises(ValueError):
+        parser.finalize_ocr_review(session, {})
+
+    included = parser.finalize_ocr_review(session, {issue.issue_id: "include"})
+    assert included.blocks[0].content == issue.recognized_content
+    assert "LOW_TEXT_CONFIDENCE" in included.blocks[0].extraction_evidence.quality_flags
+
+    excluded = parser.finalize_ocr_review(session, {issue.issue_id: "exclude"})
+    assert all(block.block_type != "text" for block in excluded.blocks)
+    assert [block.block_type for block in excluded.blocks] == ["table", "figure"]
+
+
+def test_pdf_ocr_review_collects_every_problem_region_before_pausing(tmp_path) -> None:
+    class TwoIssues(_FakeOcrBackend):
+        def analyze_page(self, image, *, page_number, languages):
+            page = super().analyze_page(image, page_number=page_number, languages=languages)
+            second = replace(page.regions[0], region_id="second", reading_order=2,
+                             bbox_pixels=(10, 80, image.width - 10, 99),
+                             text="another uncertain region", source_region_index=2)
+            return replace(page, regions=(page.regions[0], second, *page.regions[1:]))
+
+    path = tmp_path / "scan.pdf"
+    _image_only_pdf(path)
+    parser = PdfParser(ocr_backend=TwoIssues(low_confidence=True),
+                       ocr_render_dpi=72, ocr_artifact_dir=tmp_path / "artifacts")
+    with pytest.raises(OcrReviewRequired) as pending:
+        parser.parse(path, review_ocr=True)
+    issues = pending.value.session.issues
+    assert [issue.number for issue in issues] == ["R1", "R2"]
+    assert {issue.block_id for issue in issues} == {"title", "second"}
 
 
 def test_paddle_region_index_matches_preview_without_renumbering_block_id() -> None:

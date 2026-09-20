@@ -62,6 +62,11 @@ class TranslateRequest(CanonicalModel):
     schema_version: NonEmptyString = "0.1.0"
 
 
+class OcrReviewDecisionRequest(CanonicalModel):
+    action: Literal["continue", "stop"]
+    decisions: dict[str, Literal["include", "exclude"]] = Field(default_factory=dict)
+
+
 class TranslationTraceEvent(CanonicalModel):
     stage: NonEmptyString
     status: Literal["success", "review_required", "failed"]
@@ -85,6 +90,7 @@ class TranslateResult(CanonicalModel):
     translation_id: NonEmptyString
     status: Literal[
         "success",
+        "partial",
         "review_required",
         "validation_failed",
         "export_failed",
@@ -98,3 +104,4 @@ class TranslateResult(CanonicalModel):
     trace: list[TranslationTraceEvent] = Field(default_factory=list)
     deepseek_trace: DeepSeekTraceSummary | None = None
     ocr_intermediate: dict | None = None
+    ocr_review: dict | None = None

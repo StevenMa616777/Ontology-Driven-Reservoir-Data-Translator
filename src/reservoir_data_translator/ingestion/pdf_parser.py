@@ -101,6 +101,38 @@ class _PageAnalysis:
         return not self.has_native_text and self.image_count > 0
 
 
+@dataclass(frozen=True)
+class OcrReviewIssue:
+    issue_id: str
+    page: int
+    page_index: int
+    number: str
+    block_id: str
+    label: str
+    region_type: str
+    bbox: tuple[float, float, float, float]
+    confidence: float | None
+    flags: tuple[str, ...]
+    raw_content: str
+    recognized_content: str
+
+
+@dataclass(frozen=True)
+class OcrReviewSession:
+    issues: tuple[OcrReviewIssue, ...]
+    pages: tuple[tuple[OcrPageResult, float, float], ...]
+    path: Path
+    source_id: str
+    source_quality_flags: tuple[str, ...]
+    artifact: dict[str, Any]
+
+
+class OcrReviewRequired(Exception):
+    def __init__(self, session: OcrReviewSession) -> None:
+        self.session = session
+        super().__init__(f"{len(session.issues)} OCR region(s) need review")
+
+
 class PdfParser(DocumentParser):
     """Parse native PDFs or whole-document scans through an optional OCR backend."""
 
@@ -148,6 +180,7 @@ class PdfParser(DocumentParser):
         path: str | Path,
         *,
         source_id: str | None = None,
+        review_ocr: bool = False,
     ) -> RawDocument:
         source_path = self._source_path(path)
         # TODO: 延迟失败设计 Codex考虑了不同的 parser分服务包装给用户的情况
@@ -214,9 +247,15 @@ class PdfParser(DocumentParser):
                     pending = self._parse_restricted_document(
                         analyses,
                         path=source_path,
+                        source_id=self._source_id(source_path, source_id),
+                        review_ocr=review_ocr,
                     )
                 else:
-                    pending = self._parse_document_mode(analyses, path=source_path)
+                    pending = self._parse_document_mode(
+                        analyses, path=source_path,
+                        source_id=self._source_id(source_path, source_id),
+                        review_ocr=review_ocr,
+                    )
         except IngestionError:
             raise
         except PDFPasswordIncorrect as exc:
@@ -280,6 +319,8 @@ class PdfParser(DocumentParser):
         analyses: Sequence[_PageAnalysis],
         *,
         path: Path,
+        source_id: str,
+        review_ocr: bool,
     ) -> list[_PendingBlock]:
         context = {
             "restriction": "copy_and_text_extraction",
@@ -304,6 +345,8 @@ class PdfParser(DocumentParser):
             analyses,
             path=path,
             source_quality_flags=("SOURCE_TEXT_EXTRACTION_RESTRICTED",),
+            source_id=source_id,
+            review_ocr=review_ocr,
         )
 
     def _parse_document_mode(
@@ -311,6 +354,8 @@ class PdfParser(DocumentParser):
         analyses: Sequence[_PageAnalysis],
         *,
         path: Path,
+        source_id: str,
+        review_ocr: bool,
     ) -> list[_PendingBlock]:
         ocr_pages = [analysis.page_number for analysis in analyses if analysis.requires_ocr]
         native_pages = [
@@ -353,7 +398,9 @@ class PdfParser(DocumentParser):
                         },
                     },
                 )
-            return self._parse_scanned_document(analyses, path=path)
+            return self._parse_scanned_document(
+                analyses, path=path, source_id=source_id, review_ocr=review_ocr,
+            )
         unclassified_pages = [
             analysis.page_number
             for analysis in analyses
@@ -378,6 +425,8 @@ class PdfParser(DocumentParser):
         *,
         path: Path,
         source_quality_flags: Sequence[str] = (),
+        source_id: str,
+        review_ocr: bool,
     ) -> list[_PendingBlock]:
         assert self.ocr_backend is not None
         from .ocr.artifacts import OcrArtifactWriter, active_artifact, publish
@@ -389,12 +438,23 @@ class PdfParser(DocumentParser):
                 publish(stage="ocr", page=analysis.page_number, total_pages=len(analyses))
                 page_result = self._ocr_page(analysis, path=path)
                 results.append((analysis, page_result))
-            writer.finish()
+            artifact = writer.finish()
         except Exception as exc:
             writer.finish(str(exc))
             raise
         finally:
             active_artifact.reset(token)
+        page_data = tuple(
+            (page_result, float(analysis.page.width), float(analysis.page.height))
+            for analysis, page_result in results
+        )
+        if review_ocr and self.reject_low_confidence_ocr:
+            issues = self._ocr_review_issues(page_data, path=path)
+            if issues:
+                raise OcrReviewRequired(OcrReviewSession(
+                    issues=issues, pages=page_data, path=path, source_id=source_id,
+                    source_quality_flags=tuple(source_quality_flags), artifact=artifact,
+                ))
         pending: list[_PendingBlock] = []
         for analysis, page_result in results:
             pending.extend(
@@ -526,12 +586,12 @@ class PdfParser(DocumentParser):
         page_height: float,
         path: Path,
         source_quality_flags: Sequence[str] = (),
+        review_decisions: Mapping[str, str] | None = None,
     ) -> list[_PendingBlock]:
         pending: list[_PendingBlock] = []
         figure_index = 0
         for region_index, region in enumerate(result.regions, start=1):
             display_region = f"R{region.source_region_index or region_index}"
-            is_formula = region.layout_label.casefold() == "formula"
             bbox = self._ocr_bbox_to_pdf(
                 region,
                 image_width=result.image_width,
@@ -551,11 +611,12 @@ class PdfParser(DocumentParser):
                 if region.confidence is not None
                 else None
             )
-            review_flags = [flag for flag in region.quality_flags
-                            if not (is_formula and flag in {"LOW_TEXT_CONFIDENCE", "OCR_CONFIDENCE_UNAVAILABLE"})]
-            if not is_formula and region.region_type in {"text", "table"} and confidence is None:
-                review_flags.append("OCR_CONFIDENCE_UNAVAILABLE")
-            if self.reject_low_confidence_ocr and review_flags:
+            review_flags = self._ocr_review_flags(region, confidence)
+            issue_id = self._ocr_issue_id(result.page_number, region, region_index)
+            decision = review_decisions.get(issue_id) if review_decisions is not None else None
+            if review_flags and decision == "exclude":
+                continue
+            if self.reject_low_confidence_ocr and review_flags and decision != "include":
                 raise IngestionError(
                     "PDF_OCR_LOW_CONFIDENCE",
                     (
@@ -703,6 +764,73 @@ class PdfParser(DocumentParser):
                 )
             )
         return self._structure_and_chunk(pending, path=path)
+
+    @staticmethod
+    def _ocr_issue_id(page: int, region: OcrRegion, index: int) -> str:
+        return f"p{page:04d}-r{region.source_region_index or index:04d}"
+
+    @staticmethod
+    def _ocr_review_flags(region: OcrRegion, confidence: float | None) -> list[str]:
+        is_formula = region.layout_label.casefold() == "formula"
+        flags = [flag for flag in region.quality_flags
+                 if not (is_formula and flag in {"LOW_TEXT_CONFIDENCE", "OCR_CONFIDENCE_UNAVAILABLE"})]
+        if not is_formula and region.region_type in {"text", "table"} and confidence is None:
+            flags.append("OCR_CONFIDENCE_UNAVAILABLE")
+        return list(dict.fromkeys(flags))
+
+    def _ocr_review_issues(
+        self,
+        pages: tuple[tuple[OcrPageResult, float, float], ...],
+        *,
+        path: Path,
+    ) -> tuple[OcrReviewIssue, ...]:
+        issues: list[OcrReviewIssue] = []
+        for page_index, (result, width, height) in enumerate(pages):
+            for index, region in enumerate(result.regions, 1):
+                number = f"R{region.source_region_index or index}"
+                confidence = (self._normalized_ocr_confidence(
+                    region.confidence, path=path, page=result.page_number,
+                    display_region=number,
+                ) if region.confidence is not None else None)
+                flags = self._ocr_review_flags(region, confidence)
+                if not flags:
+                    continue
+                bbox = self._ocr_bbox_to_pdf(
+                    region, image_width=result.image_width, image_height=result.image_height,
+                    page_width=width, page_height=height, path=path, page=result.page_number,
+                )
+                content = (region.text if region.region_type == "text" else
+                           json.dumps({"columns": region.table.columns, "rows": region.table.rows},
+                                      ensure_ascii=False, indent=2) if region.table else "")
+                issues.append(OcrReviewIssue(
+                    issue_id=self._ocr_issue_id(result.page_number, region, index),
+                    page=result.page_number, page_index=page_index, number=number,
+                    block_id=region.region_id, label=region.layout_label,
+                    region_type=region.region_type, bbox=bbox, confidence=confidence,
+                    flags=tuple(flags), raw_content=region.raw_content or content or "",
+                    recognized_content=content or "",
+                ))
+        return tuple(issues)
+
+    def finalize_ocr_review(
+        self,
+        session: OcrReviewSession,
+        decisions: Mapping[str, str],
+    ) -> RawDocument:
+        expected = {issue.issue_id for issue in session.issues}
+        if set(decisions) != expected or any(value not in {"include", "exclude"} for value in decisions.values()):
+            raise ValueError("Every OCR issue needs exactly one include/exclude decision")
+        pending: list[_PendingBlock] = []
+        for result, width, height in session.pages:
+            pending.extend(self._ocr_blocks(
+                result, page_width=width, page_height=height, path=session.path,
+                source_quality_flags=session.source_quality_flags,
+                review_decisions=decisions,
+            ))
+        return RawDocument(
+            source_id=session.source_id, source_type=self.source_type,
+            file_name=session.path.name, blocks=self._materialize_blocks(pending),
+        )
 
     @staticmethod
     def _source_part(region: _PendingBlock, *, role: str = "evidence") -> SourceRegionPart:

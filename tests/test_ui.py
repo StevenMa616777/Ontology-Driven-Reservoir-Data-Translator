@@ -17,7 +17,7 @@ async def test_workbench_root_serves_design_pipeline(
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     assert response.headers["cache-control"] == "no-store, max-age=0"
-    assert response.headers["x-reservoir-ui-version"] == "ocr-overlay-v8"
+    assert response.headers["x-reservoir-ui-version"] == "ocr-review-v1"
     assert "Reservoir Translator Workbench" in response.text
     assert "Source" in response.text
     assert "Semantic" in response.text
@@ -26,8 +26,8 @@ async def test_workbench_root_serves_design_pipeline(
     assert "Target" in response.text
     assert 'id="source-input"' in response.text
     assert 'id="run-button"' in response.text
-    assert "/ui/app.js?v=ocr-overlay-v8" in response.text
-    assert "/ui/ocr-comparison-layout.js?v=ocr-overlay-v8" in response.text
+    assert "/ui/app.js?v=ocr-review-v1" in response.text
+    assert "/ui/ocr-comparison-layout.js?v=ocr-review-v1" in response.text
     assert 'accept=".txt,.json,.csv,.xlsx,.pdf"' in response.text
     await client.aclose()
 

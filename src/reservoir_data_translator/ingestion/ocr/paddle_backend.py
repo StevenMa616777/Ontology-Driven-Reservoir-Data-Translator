@@ -300,6 +300,7 @@ class PaddleOcrBackend:
                         confidence=confidence,
                         quality_flags=tuple(quality_flags),
                         source_region_index=fallback_order,
+                        raw_content=str(raw_region.get("block_content") or ""),
                     )
                 )
                 continue
@@ -315,6 +316,7 @@ class PaddleOcrBackend:
                         reading_order=order,
                         confidence=confidence,
                         source_region_index=fallback_order,
+                        raw_content=content,
                     )
                 )
                 continue
@@ -333,6 +335,7 @@ class PaddleOcrBackend:
                     confidence=confidence,
                     quality_flags=tuple(quality_flags),
                     source_region_index=fallback_order,
+                    raw_content=content,
                 )
             )
         return regions

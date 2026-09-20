@@ -25,7 +25,7 @@ from .ocr import (
     OcrTable,
     PaddleOcrBackend,
 )
-from .pdf_parser import PDFParser, PdfParser
+from .pdf_parser import PDFParser, PdfParser, OcrReviewRequired, OcrReviewSession
 from .text_parser import TextParser, TxtParser
 
 
@@ -68,6 +68,8 @@ __all__ = [
     "OcrBackendError",
     "OcrPageResult",
     "OcrRegion",
+    "OcrReviewRequired",
+    "OcrReviewSession",
     "OcrTable",
     "PDFParser",
     "PaddleOcrBackend",

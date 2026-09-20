@@ -232,7 +232,16 @@ function renderOcrIntermediate(artifact) {
   }
   // Polling must not reload a preview the user is already reading.
   const key = `${artifact.artifact_id}:${artifact.status}`;
-  if (panel.dataset.artifactKey === key) return;
+  if (panel.dataset.artifactKey === key) {
+    if (artifact.review_url && !panel.querySelector("[data-ocr-review-download]")) {
+      const link = document.createElement("a");
+      link.dataset.ocrReviewDownload = "";
+      link.href = artifact.review_url;
+      link.textContent = "下载 OCR 审查记录";
+      panel.querySelector(".ocr-actions")?.append(link);
+    }
+    return;
+  }
   panel.dataset.artifactKey = key;
   const available = ["complete", "partial"].includes(artifact.status);
   const partial = artifact.status === "partial";
@@ -240,7 +249,7 @@ function renderOcrIntermediate(artifact) {
     <h2>OCR 中间结果${partial ? " · 部分完成" : ""}</h2>
     <p>${escapeHtml(artifact.file_name)} · 已识别 ${artifact.completed_pages.length} / ${artifact.total_pages} 页</p>
     <p class="ocr-local-path">已保存到本地：${escapeHtml(artifact.local_path)}</p>
-    ${available ? `<div class="ocr-actions"><button type="button" class="button" data-ocr-original>浏览原始文件</button><a class="button" href="${escapeHtml(artifact.download_url)}">下载 OCR 中间结果</a><a href="${escapeHtml(artifact.raw_url)}" target="_blank" rel="noopener">下载原始 OCR JSON</a></div>
+    ${available ? `<div class="ocr-actions"><button type="button" class="button" data-ocr-original>浏览原始文件</button><a class="button" href="${escapeHtml(artifact.download_url)}">下载 OCR 中间结果</a><a href="${escapeHtml(artifact.raw_url)}" target="_blank" rel="noopener">下载原始 OCR JSON</a>${artifact.review_url ? `<a data-ocr-review-download href="${escapeHtml(artifact.review_url)}">下载 OCR 审查记录</a>` : ""}</div>
     ${artifact.comparison_url ? `<details class="ocr-preview" data-ocr-comparison><summary>对照浏览源文件与 OCR 中间结果</summary><div data-ocr-comparison-body></div></details><p data-ocr-hint>红框对应 OCR block_bbox；页面外的 R 编号和类型对应原始识别区域。左右两栏同步滚动、缩放和翻页。</p>` : `<details class="ocr-preview"><summary>浏览 OCR 中间结果</summary><iframe title="OCR 原始识别结果 PDF" data-src="${escapeHtml(artifact.preview_url)}"></iframe></details>`}
     ${artifact.source_regions_download_url ? `<a class="button" href="${escapeHtml(artifact.source_regions_download_url)}">下载源文件 OCR 区域红框</a>` : ""}` : `<p>中间 PDF 未能生成。${escapeHtml(artifact.error || "请检查服务日志。")}</p><a href="${escapeHtml(artifact.raw_url)}" target="_blank" rel="noopener">下载已保存的 OCR JSON</a>`}
     <p>内容来自 OCR 输出，未经切片、语义映射或数字纠正。${partial ? `已完成原文页：${escapeHtml(artifact.completed_pages.join("、"))}；其余页面未完成。` : ""}</p>`;
@@ -439,15 +448,85 @@ async function loadOcrComparison(details, artifact) {
   setZoom(1);
 }
 
+function renderOcrReview(job, statusUrl) {
+  let panel = document.querySelector("#ocr-review");
+  if (!job || job.status !== "ocr_review_required") {
+    panel?.remove();
+    return;
+  }
+  if (panel?.dataset.taskId === job.task_id) return;
+  panel?.remove();
+  panel = document.createElement("section");
+  panel.id = "ocr-review";
+  panel.className = "ocr-review";
+  panel.dataset.taskId = job.task_id;
+  const items = job.ocr_review?.items || [];
+  panel.innerHTML = `
+    <h2>OCR 问题区域人工审查</h2>
+    <p>已完成 OCR 识别，后续流程正在等待决定。请对每个区域选择带入或排除；原始识别结果和置信度会保留。</p>
+    <div class="ocr-review-list">${items.map((item, index) => `
+      <article class="ocr-review-card" data-ocr-issue="${escapeHtml(item.issue_id)}">
+        <header><strong>${escapeHtml(item.number)} · 第 ${escapeHtml(item.page)} 页</strong>
+          <span>${escapeHtml(item.label)}</span><small>${escapeHtml(item.flags.join("、"))}</small>
+          <small>置信度 ${item.confidence == null ? "不可用" : `${Math.round(item.confidence * 100)}%`}</small></header>
+        <div class="ocr-review-evidence">
+          <div><h3>源文件区域</h3>${item.source_image_url
+            ? `<img loading="lazy" src="${escapeHtml(item.source_image_url)}" alt="第 ${escapeHtml(item.page)} 页 ${escapeHtml(item.number)} 的原始图像">`
+            : "<p>区域图像不可用；请使用上方对照视图核对。</p>"}</div>
+          <div><h3>OCR 原始块内容</h3><pre>${escapeHtml(item.raw_content || "（空）")}</pre></div>
+          <div><h3>进入后续流程的识别内容</h3><pre>${escapeHtml(item.recognized_content || "（空）")}</pre></div>
+        </div>
+        <fieldset><legend>这个区域如何处理？</legend>
+          <label><input type="radio" name="ocr-decision-${index}" value="include">带入后续流程（接受当前识别）</label>
+          <label><input type="radio" name="ocr-decision-${index}" value="exclude">排除后续流程（保留原始证据）</label>
+        </fieldset>
+      </article>`).join("")}</div>
+    <div class="ocr-review-actions"><button type="button" data-ocr-stop>停止本次流程</button>
+      <button type="button" class="button button-primary" data-ocr-continue disabled>继续后续流程</button>
+      <span data-ocr-review-count>待决定 ${items.length} 项</span></div>
+    <p class="ocr-review-message" role="status"></p>`;
+  const intermediate = document.querySelector("#ocr-intermediate");
+  (intermediate || elements.resultRoot).after(panel);
+  const continueButton = panel.querySelector("[data-ocr-continue]");
+  const message = panel.querySelector(".ocr-review-message");
+  function decisions() {
+    return Object.fromEntries(items.flatMap((item, index) => {
+      const checked = panel.querySelector(`input[name="ocr-decision-${index}"]:checked`);
+      return checked ? [[item.issue_id, checked.value]] : [];
+    }));
+  }
+  panel.addEventListener("change", () => {
+    const count = Object.keys(decisions()).length;
+    panel.querySelector("[data-ocr-review-count]").textContent = `已决定 ${count} / ${items.length} 项`;
+    continueButton.disabled = count !== items.length;
+  });
+  async function submit(action) {
+    panel.querySelectorAll("button, input").forEach(control => { control.disabled = true; });
+    message.textContent = action === "stop" ? "正在停止流程…" : "正在保存审查决定并继续…";
+    try {
+      await postJson(`${statusUrl}/ocr-review`, { action, decisions: decisions() });
+      message.textContent = action === "stop" ? "本次流程已停止。" : "审查决定已保存，后续流程正在运行。";
+    } catch (error) {
+      panel.querySelectorAll("button, input").forEach(control => { control.disabled = false; });
+      continueButton.disabled = Object.keys(decisions()).length !== items.length;
+      message.textContent = error.message || "审查决定提交失败。";
+    }
+  }
+  panel.querySelector("[data-ocr-stop]").addEventListener("click", () => submit("stop"));
+  continueButton.addEventListener("click", () => submit("continue"));
+}
+
 async function waitForTranslation(statusUrl) {
   for (;;) {
     const job = await getJson(statusUrl);
     renderOcrIntermediate(job.ocr_intermediate);
+    renderOcrReview(job, statusUrl);
     renderAvailableDeepSeekTrace(job.deepseek_trace);
     const progress = document.querySelector("#translation-progress");
-    const stages = { queued: "任务已排队，等待前一个任务完成。", ingest: "正在解析文件并判断是否需要 OCR。", ocr: `正在 OCR 识别，第 ${job.page || 1} / ${job.total_pages || "—"} 页。`, ocr_artifact: "OCR 中间结果已保存，正在整理识别结果。", semantic_map: job.ocr_intermediate ? "OCR 已完成，正在进行语义映射；现在可以浏览 OCR 中间结果。" : "本文件未使用 OCR，正在进行语义映射。" };
+    const stages = { queued: "任务已排队，等待前一个任务完成。", ingest: "正在解析文件并判断是否需要 OCR。", ocr: `正在 OCR 识别，第 ${job.page || 1} / ${job.total_pages || "—"} 页。`, ocr_artifact: "OCR 中间结果已保存，正在整理识别结果。", ocr_review: "OCR 已完成，等待人工审查问题区域。", ocr_review_resuming: "OCR 审查已结束，正在恢复后续流程。", semantic_map: job.ocr_intermediate ? "OCR 已完成，正在进行语义映射；现在可以浏览 OCR 中间结果。" : "本文件未使用 OCR，正在进行语义映射。" };
     if (progress) progress.textContent = stages[job.stage] || "正在完成转换。";
     if (job.status === "completed") return job.result;
+    if (job.status === "stopped") return { stopped: true };
     if (job.status === "failed") {
       const error = { ...(job.error || {}), deepseek_trace: job.deepseek_trace || job.error?.deepseek_trace };
       throw new APIError(error.code || "TRANSLATION_FAILED", error.message || "转换失败。", 422, error);
@@ -921,12 +1000,13 @@ function renderResult(result) {
   state.result = result;
   const mappings = result.semantic_mapping?.mappings || [];
   const reviewRequired = result.status === "review_required";
-  const railIndex = reviewRequired ? 2 : result.status === "success" ? 4 : 3;
+  const railIndex = reviewRequired ? 2 : ["success", "partial"].includes(result.status) ? 4 : 3;
   updateRail(railIndex);
   const mappedCount = mappings.filter((mapping) => mapping.status === "MAPPED").length;
   const unresolvedCount = mappings.length - mappedCount;
   const statusCopy = {
     success: ["转换完成", "success"],
+    partial: ["部分转换完成 · 已排除 OCR 区域", "warning"],
     review_required: ["等待人工审查", "warning"],
     validation_failed: ["Canonical 校验未通过", "danger"],
     export_failed: ["目标平台导出被阻断", "danger"],
@@ -940,6 +1020,7 @@ function renderResult(result) {
       <div><p class="eyebrow">TRANSLATION ${escapeHtml(result.translation_id?.slice(0, 8) || "REVIEWED")}</p><h2>${statusCopy[0]}</h2></div>
       <div class="result-metrics"><span><b>${mappings.length}</b> 映射项</span><span><b>${unresolvedCount}</b> 未解决</span><span class="status-pill status-${statusCopy[1]}">${escapeHtml(result.status)}</span></div>
     </header>
+    ${result.ocr_review?.excluded_count ? `<div class="review-banner"><span>!</span><div><strong>这是包含源区域缺口的结果</strong><p>人工审查排除了 ${result.ocr_review.excluded_count} 个 OCR 区域：${escapeHtml(result.ocr_review.excluded_regions.map(item => `第 ${item.page} 页 ${item.number}`).join("、"))}。后续阶段已按剩余证据运行；请在正式使用前核对缺失内容。</p></div></div>` : ""}
 
     <section class="stage-section" id="source-result">
       <div class="stage-heading"><span class="stage-number">01</span><div><p class="step-label">SOURCE</p><h2>解析后的源资料</h2></div><span class="stage-meta">${escapeHtml(result.source?.file_name)} · ${escapeHtml(result.source?.source_type?.toUpperCase())} · ${result.source?.blocks?.length || 0} blocks</span></div>
@@ -957,7 +1038,7 @@ function renderResult(result) {
     </section>
 
     <section class="stage-section" id="canonical-result">
-      <div class="stage-heading"><span class="stage-number">04</span><div><p class="step-label">CANONICAL + VALIDATE</p><h2>平台无关数据模型</h2></div>${canonicalJson ? '<div class="section-actions"><button class="text-button" data-copy="canonical">复制 JSON</button><button class="text-button" data-download="canonical">下载</button></div>' : ""}</div>
+      <div class="stage-heading"><span class="stage-number">04</span><div><p class="step-label">CANONICAL + VALIDATE</p><h2>平台无关数据模型</h2></div>${canonicalJson && !result.ocr_review?.excluded_count ? '<div class="section-actions"><button class="text-button" data-copy="canonical">复制 JSON</button><button class="text-button" data-download="canonical">下载</button></div>' : ""}</div>
       ${canonicalJson ? `<pre class="code-window json-code" id="canonical-code">${escapeHtml(canonicalJson)}</pre>` : emptyStage("安全门通过后才会构建 Canonical Model。")}
       <div class="validation-grid">
         ${renderValidationCard("L1–L3 Canonical Validation", result.validation)}
@@ -966,9 +1047,9 @@ function renderResult(result) {
     </section>
 
     <section class="stage-section target-section" id="target-result">
-      <div class="stage-heading"><span class="stage-number">05</span><div><p class="step-label">TARGET PLATFORM</p><h2>${escapeHtml(result.target?.platform?.toUpperCase() || selectedTarget().toUpperCase())} 生成结果</h2></div>${targetContent ? '<div class="section-actions"><button class="text-button" data-copy="target">复制文本</button><button class="text-button" data-download="target">下载文件</button></div>' : ""}</div>
+      <div class="stage-heading"><span class="stage-number">05</span><div><p class="step-label">TARGET PLATFORM</p><h2>${escapeHtml(result.target?.platform?.toUpperCase() || selectedTarget().toUpperCase())} 生成结果</h2></div>${targetContent && !result.ocr_review?.excluded_count ? '<div class="section-actions"><button class="text-button" data-copy="target">复制文本</button><button class="text-button" data-download="target">下载文件</button></div>' : ""}</div>
       ${targetContent ? `<pre class="code-window target-code" id="target-code">${escapeHtml(targetContent)}</pre>` : emptyStage("导出校验通过后才会渲染目标格式；系统不会跳过上游问题。")}
-      ${targetContent ? '<p class="target-disclaimer">当前为 PoC 平台片段。Eclipse 井控输出仍需要宿主 Deck 的 WELSPECS / COMPDAT 上下文；CMG 为未验证版本的 IMEX-style 片段。</p>' : ""}
+      ${result.status === "partial" ? '<p class="target-disclaimer">此内容仅供检查处理流程，含已排除的 OCR 区域，不作为完整导出文件。</p>' : targetContent ? '<p class="target-disclaimer">当前为 PoC 平台片段。Eclipse 井控输出仍需要宿主 Deck 的 WELSPECS / COMPDAT 上下文；CMG 为未验证版本的 IMEX-style 片段。</p>' : ""}
     </section>
 
     ${renderDeepSeekTraceShell(result.deepseek_trace)}
@@ -991,7 +1072,8 @@ async function continueAfterReview() {
       exportResult = await postJson(`/export/${encodeURIComponent(targetPlatform)}`, { canonical_model: canonical });
     }
     const target = exportResult?.target || null;
-    const status = !validation.valid ? "validation_failed" : target ? "success" : "export_failed";
+    const status = !validation.valid ? "validation_failed" : target
+      ? (state.result.ocr_review?.excluded_count ? "partial" : "success") : "export_failed";
     renderResult({
       ...state.result,
       status,
@@ -1182,6 +1264,7 @@ async function runTranslation() {
   setRunning(true);
   state.translationFile = state.file;
   renderOcrIntermediate(null);
+  renderOcrReview(null);
   renderLoading();
   try {
     const source = state.translationFile ? await fileToSource(state.translationFile) : {
@@ -1198,6 +1281,11 @@ async function runTranslation() {
     if (elements.sourceSystem.value) body.source_system = elements.sourceSystem.value;
     const job = await postJson("/translation-jobs", body);
     const result = await waitForTranslation(job.status_url);
+    if (result.stopped) {
+      elements.resultRoot.className = "result-shell";
+      elements.resultRoot.innerHTML = '<div class="review-banner"><span>■</span><div><strong>本次流程已停止</strong><p>OCR 中间结果与审查决定已保留，后续阶段没有运行。</p></div></div>';
+      return;
+    }
     renderOcrIntermediate(result.ocr_intermediate);
     renderResult(result);
     elements.resultRoot.scrollIntoView({ behavior: "smooth", block: "start" });

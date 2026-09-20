@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from dataclasses import asdict
 import asyncio
 import json
 import os
@@ -27,6 +28,8 @@ from reservoir_data_translator.canonical import (
 )
 from reservoir_data_translator.ingestion import (
     IngestionError,
+    OcrReviewRequired,
+    OcrReviewSession,
     PaddleOcrBackend,
     PdfParser,
     RawDocument,
@@ -56,6 +59,7 @@ from .models import (
     DeepSeekTraceSummary,
     ExportRequest,
     ExportResponse,
+    OcrReviewDecisionRequest,
     SemanticMapRequest,
     SourceInput,
     TargetArtifact,
@@ -75,7 +79,7 @@ from reservoir_data_translator.ingestion.ocr.artifacts import artifact_root, pro
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 UI_ROOT = Path(__file__).resolve().parent.parent / "ui"
 DEFAULT_TRACE_ROOT = PROJECT_ROOT / "artifacts" / "deepseek_traces"
-UI_VERSION = "ocr-overlay-v8"
+UI_VERSION = "ocr-review-v1"
 
 
 class NoStoreStaticFiles(StaticFiles):
@@ -367,6 +371,7 @@ def create_app(
     # One running translation per process protects the shared model instance.
     translation_lock = asyncio.Lock()
     jobs: dict[str, dict] = {}
+    review_sessions: dict[str, tuple[TranslateRequest, OcrReviewSession]] = {}
     background_tasks: set[asyncio.Task] = set()
     api.state.translation_jobs = jobs
     api.mount("/ui", NoStoreStaticFiles(directory=UI_ROOT), name="ui")
@@ -613,12 +618,17 @@ def create_app(
             ) from exc
         return PlainTextResponse(content, media_type="text/plain; charset=utf-8")
 
-    async def execute_translation(request: TranslateRequest, translation_id: str) -> TranslateResult:
+    async def execute_translation(
+        request: TranslateRequest, translation_id: str,
+        *, source_override: RawDocument | None = None,
+        review_summary: dict | None = None,
+    ) -> TranslateResult:
         services = service()
         trace: list[TranslationTraceEvent] = []
         try:
             publish(stage="ingest")
-            source = await asyncio.to_thread(services.ingest, request.source)
+            source = (source_override if source_override is not None else
+                      await asyncio.to_thread(services.ingest, request.source, review_ocr=True))
             restricted_ocr = any(
                 block.extraction_evidence is not None
                 and "SOURCE_TEXT_EXTRACTION_RESTRICTED"
@@ -632,13 +642,23 @@ def create_app(
                     detail=(
                         "PDF text extraction was restricted; pages were rendered "
                         "and processed through OCR automatically."
-                        if restricted_ocr
-                        else None
+                        if restricted_ocr else
+                        "OCR review decisions applied before semantic mapping."
+                        if review_summary else None
                     ),
                 )
             )
+        except OcrReviewRequired:
+            raise
         except IngestionError as exc:
             raise _ingestion_http_error(exc) from exc
+
+        if review_summary is not None:
+            trace.append(TranslationTraceEvent(
+                stage="ocr_review", status="success",
+                detail=(f"{review_summary['included_count']} included, "
+                        f"{review_summary['excluded_count']} excluded OCR region(s)."),
+            ))
 
         deepseek_calls: list[DeepSeekCallTrace] = []
         semantic_status = "failed"
@@ -756,7 +776,7 @@ def create_app(
         trace.append(TranslationTraceEvent(stage="render", status="success"))
         return TranslateResult(
             translation_id=translation_id,
-            status="success",
+            status="partial" if review_summary and review_summary["excluded_count"] else "success",
             source=source,
             semantic_mapping=semantic,
             canonical_model=canonical,
@@ -771,7 +791,11 @@ def create_app(
             deepseek_trace=deepseek_trace_summary,
         )
 
-    async def run_translation(request: TranslateRequest, task_id: str, state: dict) -> TranslateResult:
+    async def run_translation(
+        request: TranslateRequest, task_id: str, state: dict,
+        *, source_override: RawDocument | None = None,
+        review_summary: dict | None = None,
+    ) -> TranslateResult:
         loop = asyncio.get_running_loop()
 
         def progress(event: dict) -> None:
@@ -781,10 +805,16 @@ def create_app(
             state.update(status="running", stage="ingest")
             token = progress_callback.set(progress)
             try:
-                result = await execute_translation(request, task_id)
+                result = await execute_translation(
+                    request, task_id, source_override=source_override,
+                    review_summary=review_summary,
+                )
                 # Flush page events queued by the ingestion worker before attaching.
                 await asyncio.sleep(0)
-                return result.model_copy(update={"ocr_intermediate": state.get("ocr_intermediate")})
+                return result.model_copy(update={
+                    "ocr_intermediate": state.get("ocr_intermediate"),
+                    "ocr_review": review_summary,
+                })
             except HTTPException as exc:
                 # Deliver the semantic-finally event before exposing the failure.
                 await asyncio.sleep(0)
@@ -799,6 +829,11 @@ def create_app(
         state: dict = {}
         try:
             return await run_translation(request, str(uuid4()), state)
+        except OcrReviewRequired as exc:
+            error = _http_error(409, "OCR_REVIEW_REQUIRES_JOB",
+                                "OCR 区域需要人工审查；请通过转换任务接口提交以暂停和继续。")
+            error.detail["ocr_intermediate"] = exc.session.artifact
+            raise error from exc
         except HTTPException as exc:
             if state.get("ocr_intermediate") and isinstance(exc.detail, dict):
                 exc.detail["ocr_intermediate"] = state["ocr_intermediate"]
@@ -813,7 +848,7 @@ def create_app(
         for key in list(jobs):
             if len(jobs) < 100:
                 break
-            if jobs[key]["status"] in {"completed", "failed"}:
+            if jobs[key]["status"] in {"completed", "failed", "stopped"}:
                 del jobs[key]
         task_id = str(uuid4())
         state = {"task_id": task_id, "status": "queued", "stage": "queued", "ocr_intermediate": None}
@@ -823,6 +858,22 @@ def create_app(
             try:
                 result = await run_translation(request, task_id, state)
                 state.update(status="completed", stage="complete", result=result.model_dump(mode="json"))
+            except OcrReviewRequired as exc:
+                # The OCR worker has finished; release the run lock while a person reviews.
+                await asyncio.sleep(0)
+                session = exc.session
+                review_sessions[task_id] = (request, session)
+                source_pdf = Path(session.artifact["local_path"]).with_suffix(".clean-source.pdf")
+                state.update(
+                    status="ocr_review_required", stage="ocr_review",
+                    ocr_intermediate=session.artifact,
+                    ocr_review={"items": [
+                        {**asdict(issue), "source_image_url": (
+                            f"/translation-jobs/{task_id}/ocr-review/{issue.issue_id}/source"
+                            if source_pdf.is_file() else None
+                        )} for issue in session.issues
+                    ]},
+                )
             except HTTPException as exc:
                 state.update(status="failed", error=exc.detail)
             except asyncio.CancelledError:
@@ -845,8 +896,112 @@ def create_app(
             raise _http_error(404, "TRANSLATION_JOB_NOT_FOUND", "任务不存在或服务已重启；已保存的 OCR 文件仍在本地目录中。")
         return state
 
+    def save_ocr_review_decisions(
+        task_id: str, session: OcrReviewSession, action: str,
+        decisions: dict[str, str],
+    ) -> None:
+        source_path = Path(session.artifact["local_path"])
+        audit_path = source_path.with_suffix(".review.json")
+        payload = {
+            "task_id": task_id, "artifact_id": session.artifact["artifact_id"],
+            "action": action, "decisions": decisions,
+            "reviewed_at": datetime.now(timezone.utc).isoformat(),
+            "issues": [asdict(issue) for issue in session.issues],
+        }
+        temporary = audit_path.with_name(audit_path.name + ".tmp")
+        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.replace(audit_path)
+
+    @api.post("/translation-jobs/{task_id}/ocr-review")
+    async def decide_ocr_review(task_id: UUID, decision: OcrReviewDecisionRequest) -> dict:
+        key = str(task_id)
+        state = jobs.get(key)
+        pending = review_sessions.get(key)
+        if state is None or pending is None or state["status"] != "ocr_review_required":
+            raise _http_error(409, "OCR_REVIEW_NOT_PENDING", "此任务当前没有待处理的 OCR 审查。")
+        request, session = pending
+        expected = {issue.issue_id for issue in session.issues}
+        if not set(decision.decisions).issubset(expected):
+            raise _http_error(422, "OCR_REVIEW_ITEM_UNKNOWN", "审查决定包含不属于此任务的区域。")
+        if decision.action == "continue":
+            if set(decision.decisions) != expected:
+                raise _http_error(422, "OCR_REVIEW_INCOMPLETE", "请为每个 OCR 问题区域选择带入或排除。")
+        try:
+            save_ocr_review_decisions(key, session, decision.action, decision.decisions)
+        except OSError as exc:
+            raise _http_error(500, "OCR_REVIEW_SAVE_FAILED", "无法保存 OCR 审查记录。") from exc
+        session.artifact["review_url"] = f"/ocr-intermediates/{session.artifact['artifact_id']}/review"
+        if decision.action == "stop":
+            review_sessions.pop(key, None)
+            state.update(status="stopped", stage="ocr_review", ocr_review={
+                **state["ocr_review"], "action": "stop", "decisions": decision.decisions,
+            })
+            return {"task_id": key, "status": "stopped"}
+
+        summary = {
+            "action": "continue", "decisions": decision.decisions,
+            "included_count": sum(value == "include" for value in decision.decisions.values()),
+            "excluded_count": sum(value == "exclude" for value in decision.decisions.values()),
+            "excluded_regions": [asdict(issue) for issue in session.issues
+                                 if decision.decisions[issue.issue_id] == "exclude"],
+        }
+        state.update(status="queued", stage="ocr_review_resuming", ocr_review={
+            **state["ocr_review"], "action": "continue", "decisions": decision.decisions,
+        })
+
+        async def resume() -> None:
+            try:
+                parser = service().pdf_parser
+                assert parser is not None
+                source = await asyncio.to_thread(parser.finalize_ocr_review, session, decision.decisions)
+                result = await run_translation(
+                    request, key, state, source_override=source, review_summary=summary,
+                )
+                state.update(status="completed", stage="complete", result=result.model_dump(mode="json"))
+            except HTTPException as exc:
+                state.update(status="failed", error=exc.detail)
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception("OCR review continuation failed: %s", key)
+                state.update(status="failed", error={
+                    "code": "OCR_REVIEW_CONTINUATION_FAILED",
+                    "message": "OCR 审查后续处理失败，请检查服务日志。",
+                })
+            finally:
+                review_sessions.pop(key, None)
+
+        task = asyncio.create_task(resume())
+        background_tasks.add(task)
+        task.add_done_callback(background_tasks.discard)
+        return {"task_id": key, "status_url": f"/translation-jobs/{key}"}
+
+    @api.get("/translation-jobs/{task_id}/ocr-review/{issue_id}/source")
+    def ocr_review_source(task_id: UUID, issue_id: str) -> Response:
+        import pdfplumber
+
+        pending = review_sessions.get(str(task_id))
+        issue = next((item for item in pending[1].issues if item.issue_id == issue_id), None) if pending else None
+        if issue is None:
+            raise _http_error(404, "OCR_REVIEW_ITEM_NOT_FOUND", "OCR 审查区域不存在。")
+        source = Path(pending[1].artifact["local_path"]).with_suffix(".clean-source.pdf")
+        if not source.is_file():
+            raise _http_error(404, "OCR_REVIEW_SOURCE_NOT_FOUND", "源文件区域图像不可用。")
+        with _ocr_render_lock, pdfplumber.open(source) as pdf:
+            page = pdf.pages[issue.page_index]
+            image = page.to_image(resolution=144).original
+            scale_x, scale_y = image.width / page.width, image.height / page.height
+            x0, top, x1, bottom = issue.bbox
+            crop = image.crop((max(0, int((x0 - 4) * scale_x)),
+                               max(0, int((top - 4) * scale_y)),
+                               min(image.width, int((x1 + 4) * scale_x)),
+                               min(image.height, int((bottom + 4) * scale_y))))
+            buffer = BytesIO()
+            crop.save(buffer, format="PNG")
+        return Response(buffer.getvalue(), media_type="image/png",
+                        headers={"Cache-Control": "no-store, max-age=0"})
+
     def ocr_intermediate(artifact_id: UUID, kind: str, download: bool = False) -> Response:
-        if kind not in {"pdf", "raw", "source-regions", "clean", "clean-source"}:
+        if kind not in {"pdf", "raw", "review", "source-regions", "clean", "clean-source"}:
             raise _http_error(404, "OCR_ARTIFACT_NOT_FOUND", "OCR 文件不存在。")
         root = (services.pdf_parser.ocr_artifact_dir if services and services.pdf_parser else None) or artifact_root()
         root = Path(root).resolve()
@@ -859,12 +1014,12 @@ def create_app(
                 continue
             # Resolve only known local files, never client-provided filesystem paths.
             stem = manifest.name.removesuffix(".manifest.json")
-            suffix = {"pdf": ".pdf", "raw": ".raw.json", "source-regions": ".source-regions.pdf",
+            suffix = {"pdf": ".pdf", "raw": ".raw.json", "review": ".review.json", "source-regions": ".source-regions.pdf",
                       "clean": ".clean.pdf", "clean-source": ".clean-source.pdf"}[kind]
             path = (root / (stem + suffix)).resolve()
             if path.parent != root or not path.is_file():
                 break
-            if kind == "raw":
+            if kind in {"raw", "review"}:
                 # Format legacy compact artifacts too, without rewriting evidence.
                 payload = json.loads(path.read_text(encoding="utf-8"))
                 return Response(

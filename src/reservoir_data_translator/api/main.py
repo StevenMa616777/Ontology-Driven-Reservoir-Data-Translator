@@ -42,6 +42,10 @@ from reservoir_data_translator.mappers import (
     PlatformMappingRegistry,
 )
 from reservoir_data_translator.ontology import OntologyRegistry
+from reservoir_data_translator.ocr_lab import (
+    CropLabService,
+    create_ocr_lab_router,
+)
 from reservoir_data_translator.semantic import (
     DeepSeekCallTrace,
     DeepSeekProvider,
@@ -79,7 +83,7 @@ from reservoir_data_translator.ingestion.ocr.artifacts import artifact_root, pro
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 UI_ROOT = Path(__file__).resolve().parent.parent / "ui"
 DEFAULT_TRACE_ROOT = PROJECT_ROOT / "artifacts" / "deepseek_traces"
-UI_VERSION = "ocr-review-v1"
+UI_VERSION = "ocr-lab-v4"
 
 
 class NoStoreStaticFiles(StaticFiles):
@@ -348,6 +352,7 @@ def create_app(
     mappers: Iterable[PlatformMapper] | None = None,
     source_mappings: Iterable[SourceMappingRegistry] | None = None,
     pdf_parser: PdfParser | None = None,
+    ocr_lab_service: CropLabService | None = None,
 ) -> FastAPI:
     if registry is None and mappers is None and source_mappings is None:
         services = _default_services(provider, pdf_parser)
@@ -370,11 +375,16 @@ def create_app(
     api.state.services = services
     # One running translation per process protects the shared model instance.
     translation_lock = asyncio.Lock()
+    crop_lab = ocr_lab_service or CropLabService()
     jobs: dict[str, dict] = {}
     review_sessions: dict[str, tuple[TranslateRequest, OcrReviewSession]] = {}
     background_tasks: set[asyncio.Task] = set()
     api.state.translation_jobs = jobs
+    api.state.ocr_lab_service = crop_lab
     api.mount("/ui", NoStoreStaticFiles(directory=UI_ROOT), name="ui")
+    api.include_router(
+        create_ocr_lab_router(crop_lab, execution_lock=translation_lock)
+    )
 
     @api.get("/", include_in_schema=False)
     def workbench() -> FileResponse:
@@ -387,6 +397,13 @@ def create_app(
     def ontology_explorer() -> FileResponse:
         return FileResponse(
             UI_ROOT / "ontology.html",
+            headers={"Cache-Control": "no-store, max-age=0", "X-Reservoir-UI-Version": UI_VERSION},
+        )
+
+    @api.get("/ocr-lab", include_in_schema=False)
+    def ocr_lab() -> FileResponse:
+        return FileResponse(
+            UI_ROOT / "ocr-lab.html",
             headers={"Cache-Control": "no-store, max-age=0", "X-Reservoir-UI-Version": UI_VERSION},
         )
 
@@ -988,17 +1005,54 @@ def create_app(
             raise _http_error(404, "OCR_REVIEW_SOURCE_NOT_FOUND", "源文件区域图像不可用。")
         with _ocr_render_lock, pdfplumber.open(source) as pdf:
             page = pdf.pages[issue.page_index]
-            image = page.to_image(resolution=144).original
+            # Use the OCR render DPI recorded with the artifact. This is still a
+            # reconstruction from the clean source PDF, so OCR Lab provenance
+            # marks it as non-identical to the original in-memory model input.
+            resolution = int(pending[1].artifact.get("render_dpi") or 144)
+            image = page.to_image(resolution=resolution).original
             scale_x, scale_y = image.width / page.width, image.height / page.height
             x0, top, x1, bottom = issue.bbox
-            crop = image.crop((max(0, int((x0 - 4) * scale_x)),
-                               max(0, int((top - 4) * scale_y)),
-                               min(image.width, int((x1 + 4) * scale_x)),
-                               min(image.height, int((bottom + 4) * scale_y))))
+            padding_points = 4.0
+            crop_box = (
+                max(0, int((x0 - padding_points) * scale_x)),
+                max(0, int((top - padding_points) * scale_y)),
+                min(image.width, int((x1 + padding_points) * scale_x)),
+                min(image.height, int((bottom + padding_points) * scale_y)),
+            )
+            crop = image.crop(crop_box)
+            crop_x0, crop_top, crop_x1, crop_bottom = crop_box
+            geometry = {
+                "coordinate_space": "pdf_top_left_points",
+                "render_dpi": resolution,
+                "page_width_points": float(page.width),
+                "page_height_points": float(page.height),
+                "region_bbox_points": [x0, top, x1, bottom],
+                "crop_bbox_points": [
+                    crop_x0 / scale_x,
+                    crop_top / scale_y,
+                    crop_x1 / scale_x,
+                    crop_bottom / scale_y,
+                ],
+                "region_bbox_pixels": [
+                    max(0.0, x0 * scale_x - crop_x0),
+                    max(0.0, top * scale_y - crop_top),
+                    min(float(crop.width), x1 * scale_x - crop_x0),
+                    min(float(crop.height), bottom * scale_y - crop_top),
+                ],
+                "image_width_pixels": crop.width,
+                "image_height_pixels": crop.height,
+                "padding_points": padding_points,
+            }
             buffer = BytesIO()
             crop.save(buffer, format="PNG")
-        return Response(buffer.getvalue(), media_type="image/png",
-                        headers={"Cache-Control": "no-store, max-age=0"})
+        return Response(
+            buffer.getvalue(),
+            media_type="image/png",
+            headers={
+                "Cache-Control": "no-store, max-age=0",
+                "X-Reservoir-OCR-Geometry": json.dumps(geometry, separators=(",", ":")),
+            },
+        )
 
     def ocr_intermediate(artifact_id: UUID, kind: str, download: bool = False) -> Response:
         if kind not in {"pdf", "raw", "review", "source-regions", "clean", "clean-source"}:

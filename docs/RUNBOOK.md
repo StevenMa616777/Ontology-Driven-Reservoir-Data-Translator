@@ -252,6 +252,26 @@ python -m pytest tests/test_ocr_artifacts.py tests/test_pdf_ingestion.py tests/t
 OCR 中间 PDF / raw JSON 仍在结构整理前保存，不重新解析重建 PDF，也不修改原始 OCR 内容。
 当前标题与表题关联是确定性规则，不会修复 OCR 数字错误或推断缺失的表格列结构。
 
+### Crop 级 OCR Lab
+
+应用在同一端口提供 `/ocr-lab`，与 Translation Workbench、Ontology Explorer 并列。
+OCR Lab 只接受 PNG、JPEG、WebP 或 TIFF 图片 crop，不接受 PDF，也不会调用 Ontology、
+语义映射、Canonical 构建或平台导出。页面支持文件选择、拖放、剪贴板图片，以及在输入图像上
+拖动画框后只运行所选子区域。
+
+OCR Lab 不隐式选择 OCR 引擎。用户必须显式选择一个 composite baseline，或选择已经注册的
+Layout、Text Detection、Text Recognition、Table 组件组合。当前 PP-StructureV3 仅注册为
+`paddle-ppstructure-v3` 整体基线，其内部能力不会伪装成可独立替换的组件。
+
+低置信度 OCR 人工审查卡会显示“送到 OCR Lab 测试”入口。该入口使用中间 clean-source PDF
+按原 OCR DPI 重建区域图像，并在 provenance 中标记为非原始内存像素。OCR Lab 会读取页面、
+原区域 bbox、扩边 bbox 和渲染 DPI；1× 以原文 100% 逻辑尺度显示，虚线框表示实际 OCR bbox。
+缩放滑条范围为 0.5×–3×、步长 0.5×，拖动只更新浏览器预览，不运行 OCR；点击运行后同一个
+倍率才用于模型输入重采样。直接上传或粘贴的 crop 保留原始字节；每次运行另存实际 crop、
+预处理后图像、选择的引擎、参数、阶段耗时和规范化结果到 `tmp/ocr_lab/runs/<run-id>/`。
+处理后图像另有像素预算检查，避免大 crop 在高倍率下耗尽内存。此功能用于单个问题区域的参数
+诊断，不等同于批量 benchmark。
+
 ### 失败任务的 DeepSeek Trace
 
 语义调用阶段结束后，无论契约校验成功还是失败，已捕获的调用日志都会落盘。

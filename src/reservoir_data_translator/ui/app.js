@@ -454,13 +454,20 @@ function renderOcrReview(job, statusUrl) {
     panel?.remove();
     return;
   }
-  if (panel?.dataset.taskId === job.task_id) return;
+  const items = job.ocr_review?.items || [];
+  const reviewFingerprint = JSON.stringify(items.map(item => ({
+    issue: item.issue_id,
+    flags: item.flags || [],
+    source: item.source_image_url || "",
+  })));
+  if (panel?.dataset.taskId === job.task_id
+      && panel.dataset.reviewFingerprint === reviewFingerprint) return;
   panel?.remove();
   panel = document.createElement("section");
   panel.id = "ocr-review";
   panel.className = "ocr-review";
   panel.dataset.taskId = job.task_id;
-  const items = job.ocr_review?.items || [];
+  panel.dataset.reviewFingerprint = reviewFingerprint;
   panel.innerHTML = `
     <h2>OCR 问题区域人工审查</h2>
     <p>已完成 OCR 识别，后续流程正在等待决定。请对每个区域选择带入或排除；原始识别结果和置信度会保留。</p>
@@ -471,7 +478,7 @@ function renderOcrReview(job, statusUrl) {
           <small>置信度 ${item.confidence == null ? "不可用" : `${Math.round(item.confidence * 100)}%`}</small></header>
         <div class="ocr-review-evidence">
           <div><h3>源文件区域</h3>${item.source_image_url
-            ? `<img loading="lazy" src="${escapeHtml(item.source_image_url)}" alt="第 ${escapeHtml(item.page)} 页 ${escapeHtml(item.number)} 的原始图像">`
+            ? `<img loading="lazy" src="${escapeHtml(item.source_image_url)}" alt="第 ${escapeHtml(item.page)} 页 ${escapeHtml(item.number)} 的原始图像">${hasLowConfidenceFlag(item.flags) ? `<div class="ocr-review-source-actions"><a class="button button-secondary ocr-lab-send" target="_blank" rel="noopener" href="/ocr-lab?source=${encodeURIComponent(item.source_image_url)}&amp;artifact=${encodeURIComponent(job.ocr_intermediate?.artifact_id || "")}&amp;issue=${encodeURIComponent(item.issue_id)}&amp;page=${encodeURIComponent(item.page)}&amp;region=${encodeURIComponent(item.number)}&amp;confidence=${encodeURIComponent(item.confidence ?? "")}&amp;flags=${encodeURIComponent((item.flags || []).join(","))}">送到 OCR Lab 测试 <span aria-hidden="true">→</span></a></div>` : ""}`
             : "<p>区域图像不可用；请使用上方对照视图核对。</p>"}</div>
           <div><h3>OCR 原始块内容</h3><pre>${escapeHtml(item.raw_content || "（空）")}</pre></div>
           <div><h3>进入后续流程的识别内容</h3><pre>${escapeHtml(item.recognized_content || "（空）")}</pre></div>
@@ -514,6 +521,12 @@ function renderOcrReview(job, statusUrl) {
   }
   panel.querySelector("[data-ocr-stop]").addEventListener("click", () => submit("stop"));
   continueButton.addEventListener("click", () => submit("continue"));
+}
+
+function hasLowConfidenceFlag(flags) {
+  return (flags || []).some(flag =>
+    /(^|_)LOW(?:_[A-Z0-9]+)*_CONFIDENCE$/.test(String(flag).trim().toUpperCase())
+  );
 }
 
 async function waitForTranslation(statusUrl) {

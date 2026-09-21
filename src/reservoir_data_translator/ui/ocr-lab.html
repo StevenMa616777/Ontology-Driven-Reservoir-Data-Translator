@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f3f0e8" />
+    <title>OCR Lab · Reservoir Translator</title>
+    <meta name="description" content="Crop-level OCR model and parameter workbench" />
+    <link rel="stylesheet" href="/ui/styles.css?v=ocr-lab-v4" />
+    <link rel="stylesheet" href="/ui/ocr-lab.css?v=ocr-lab-scale-v1" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Reservoir Translator 首页">
+        <span class="brand-mark">RT</span>
+        <span><strong>Reservoir Translator</strong><small>Ontology-driven workbench</small></span>
+      </a>
+      <div class="system-badges">
+        <nav class="product-nav" aria-label="主要页面">
+          <a href="/">Translation Workbench</a>
+          <a href="/ontology">Ontology Explorer</a>
+          <a class="is-active" href="/ocr-lab">OCR Lab</a>
+        </nav>
+        <button class="readability-toggle" type="button" data-readability-toggle aria-pressed="false" title="放大说明、详情和日志文字"><span aria-hidden="true">Aa</span> 放大文字</button>
+        <span class="badge badge-neutral">Crop Test</span>
+      </div>
+    </header>
+
+    <main class="ocr-lab-main">
+      <section class="ocr-lab-intro">
+        <div><p class="eyebrow">CROP RECOGNITION WORKBENCH</p><h1>只测试值得研究的区域。</h1></div>
+        <p>输入一个低精度 crop，固定图像证据，显式选择模型和参数。这里不接收 PDF，也不进入 Ontology、语义映射或文件转换流程。</p>
+      </section>
+
+      <section class="ocr-lab-grid">
+        <article class="panel crop-input-panel">
+          <div class="panel-heading">
+            <div><span class="step-label">INPUT</span><h2>问题 Crop</h2></div>
+            <span class="panel-note">PNG / JPEG / WebP / TIFF</span>
+          </div>
+          <label id="crop-dropzone" class="crop-dropzone" for="crop-file">
+            <input id="crop-file" type="file" accept="image/png,image/jpeg,image/webp,image/tiff" hidden />
+            <strong>拖放、选择或粘贴图片</strong>
+            <span>粘贴截图请使用 Ctrl/⌘ + V</span>
+          </label>
+          <p id="crop-source-note" class="crop-source-note" hidden></p>
+          <div id="crop-editor" class="crop-editor" hidden>
+            <div id="crop-viewport" class="crop-viewport">
+              <div id="crop-stage" class="crop-stage" aria-label="拖动以选择子 crop">
+                <img id="crop-image" alt="待测试的 Crop" draggable="false" />
+                <div id="crop-source-boundary" class="crop-source-boundary" aria-label="原 OCR bbox" hidden></div>
+                <div id="crop-selection" class="crop-selection" hidden></div>
+              </div>
+            </div>
+            <div class="crop-editor-actions">
+              <span id="crop-dimensions"></span>
+              <button id="clear-crop-selection" type="button" class="button button-secondary">使用完整图片</button>
+            </div>
+            <p class="crop-help">可直接运行完整图片，也可以在图中拖动画框，只运行选中区域。</p>
+          </div>
+          <label class="field-label" for="crop-kind">Crop 类型</label>
+          <select id="crop-kind">
+            <option value="unknown">暂不确定</option>
+            <option value="text">文本</option>
+            <option value="table">表格</option>
+            <option value="mixed">混合区域</option>
+          </select>
+          <label class="field-label lab-field" for="expected-text">期望文字（可选）</label>
+          <textarea id="expected-text" rows="3" placeholder="用于人工对照，不进行批量 benchmark。"></textarea>
+        </article>
+
+        <article class="panel crop-config-panel">
+          <div class="panel-heading">
+            <div><span class="step-label">PIPELINE</span><h2>模型与参数</h2></div>
+            <span class="panel-note">NO IMPLICIT DEFAULT</span>
+          </div>
+          <fieldset class="lab-fieldset">
+            <legend>运行方式</legend>
+            <label><input type="radio" name="pipeline-mode" value="composite" checked /> 整体基线</label>
+            <label><input type="radio" name="pipeline-mode" value="components" /> 可替换组件</label>
+          </fieldset>
+          <div id="composite-config">
+            <label class="field-label" for="composite-engine">整体引擎</label>
+            <select id="composite-engine"><option value="">请选择，不自动使用 PaddleOCR</option></select>
+            <p id="engine-description" class="crop-help"></p>
+          </div>
+          <div id="component-config" class="component-config" hidden>
+            <label>Layout<select id="layout-engine"><option value="">跳过 / 未选择</option></select></label>
+            <label>Text Detection<select id="text-detection-engine"><option value="">跳过 / 未选择</option></select></label>
+            <label>Text Recognition<select id="text-recognition-engine"><option value="">跳过 / 未选择</option></select></label>
+            <label>Table<select id="table-engine"><option value="">跳过 / 未选择</option></select></label>
+            <p class="crop-help">注册独立适配器后会自动出现在对应列表；当前整体基线不会伪装成可拆分组件。</p>
+          </div>
+
+          <hr />
+          <div class="preprocess-grid">
+            <div class="scale-control">
+              <label for="pre-scale">缩放 <output id="pre-scale-output" for="pre-scale">1×</output></label>
+              <input id="pre-scale" type="range" min="0.5" max="3" step="0.5" value="1" />
+              <div class="scale-range-labels" aria-hidden="true"><span>0.5×</span><span>3×</span></div>
+            </div>
+            <label>对比度<input id="pre-contrast" type="number" min="0.25" max="4" step="0.25" value="1" /></label>
+            <label>锐化<input id="pre-sharpen" type="number" min="0" max="3" step="1" value="0" /></label>
+            <label>扩边像素<input id="pre-padding" type="number" min="0" max="256" step="1" value="0" /></label>
+            <label class="check-field"><input id="pre-grayscale" type="checkbox" /> 灰度化</label>
+            <label>二值化阈值<input id="pre-threshold" type="number" min="0" max="255" placeholder="关闭" /></label>
+          </div>
+          <button id="run-crop" type="button" class="button button-primary" disabled>运行当前 Crop <span>→</span></button>
+          <p id="lab-status" class="lab-status" role="status"></p>
+        </article>
+      </section>
+
+      <section class="crop-results" aria-labelledby="results-title">
+        <div class="crop-results-heading"><div><p class="eyebrow">RUN HISTORY</p><h2 id="results-title">本页实验结果</h2></div><p>结果按时间保留，便于只改变一个参数后并排核对。</p></div>
+        <div id="crop-run-results" class="crop-run-results">
+          <div class="empty-state"><span class="empty-index">00</span><div><h2>尚未运行</h2><p>先输入一个 crop，再显式选择模型。</p></div></div>
+        </div>
+      </section>
+    </main>
+    <script src="/ui/ui-preferences.js?v=ocr-preview-v6" defer></script>
+    <script src="/ui/ocr-lab.js?v=ocr-lab-scale-v1" defer></script>
+  </body>
+</html>

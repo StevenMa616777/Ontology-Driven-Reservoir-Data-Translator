@@ -484,7 +484,19 @@ async def test_ocr_review_job_stops_or_continues_only_after_region_decisions(
     assert item["raw_content"] == "unreliable text"
     assert item["recognized_content"] == "unreliable text"
     assert item["source_image_url"]
-    assert (await client.get(item["source_image_url"])).headers["content-type"] == "image/png"
+    source_image = await client.get(item["source_image_url"])
+    assert source_image.headers["content-type"] == "image/png"
+    geometry = json.loads(source_image.headers["x-reservoir-ocr-geometry"])
+    assert geometry["coordinate_space"] == "pdf_top_left_points"
+    assert geometry["render_dpi"] == 72
+    assert geometry["page_width_points"] == pytest.approx(letter[0])
+    assert geometry["page_height_points"] == pytest.approx(letter[1])
+    assert geometry["region_bbox_points"] == pytest.approx([10, 10, 200, 50])
+    assert geometry["crop_bbox_points"] == pytest.approx([6, 6, 204, 54])
+    assert geometry["region_bbox_pixels"] == pytest.approx([4, 4, 194, 44])
+    assert geometry["image_width_pixels"] == 198
+    assert geometry["image_height_pixels"] == 48
+    assert geometry["padding_points"] == 4
     incomplete = await client.post(first_url + "/ocr-review", json={"action": "continue"})
     assert incomplete.status_code == 422
     stopped = await client.post(first_url + "/ocr-review", json={"action": "stop"})

@@ -469,8 +469,8 @@ function renderOcrReview(job, statusUrl) {
   panel.dataset.taskId = job.task_id;
   panel.dataset.reviewFingerprint = reviewFingerprint;
   panel.innerHTML = `
-    <h2>OCR 问题区域人工审查</h2>
-    <p>已完成 OCR 识别，后续流程正在等待决定。请对每个区域选择带入或排除；原始识别结果和置信度会保留。</p>
+    <h2>OCR 与表格结构人工审查</h2>
+    <p>请检查原始图像、识别内容和候选子表。表格边界及上下文归属需逐项确认后才能继续。</p>
     <div class="ocr-review-list">${items.map((item, index) => `
       <article class="ocr-review-card" data-ocr-issue="${escapeHtml(item.issue_id)}">
         <header><strong>${escapeHtml(item.number)} · 第 ${escapeHtml(item.page)} 页</strong>
@@ -483,10 +483,22 @@ function renderOcrReview(job, statusUrl) {
           <div><h3>OCR 原始块内容</h3><pre>${escapeHtml(item.raw_content || "（空）")}</pre></div>
           <div><h3>进入后续流程的识别内容</h3><pre>${escapeHtml(item.recognized_content || "（空）")}</pre></div>
         </div>
-        <fieldset><legend>这个区域如何处理？</legend>
+        ${item.issue_type === "table_split" ? `
+          <div class="ocr-table-tree"><h3>候选子表</h3><pre>${escapeHtml(JSON.stringify(item.table_tree, null, 2))}</pre></div>
+          <fieldset><legend>拆分决定</legend>
+            ${item.flags.includes("TABLE_SPLIT_GEOMETRY_CONFLICT") ? "<p>候选边界冲突，不能直接确认；可排除或停止后复核。</p>" : `<label><input type="radio" name="ocr-decision-${index}" value="accept">确认候选叶子表</label>`}
+            <label><input type="radio" name="ocr-decision-${index}" value="exclude">排除表格映射，保留证据</label>
+          </fieldset>
+          <div class="ocr-table-context"><h3>文字上下文归属</h3>
+            ${(item.context_candidates || []).map((candidate, contextIndex) => `<div data-context-index="${contextIndex}">
+              <p>${escapeHtml(candidate.region_id)}：${escapeHtml(candidate.text)}</p>
+              <label><input type="checkbox" data-context-none>不属于这些子表</label>
+              ${(item.table_tree?.leaf_ids || []).map(leaf => `<label><input type="checkbox" data-context-leaf="${escapeHtml(leaf)}">${escapeHtml(leaf)}</label>`).join("")}
+            </div>`).join("") || "<p>没有独立的文字上下文候选。</p>"}</div>
+        ` : `<fieldset><legend>这个区域如何处理？</legend>
           <label><input type="radio" name="ocr-decision-${index}" value="include">带入后续流程（接受当前识别）</label>
           <label><input type="radio" name="ocr-decision-${index}" value="exclude">排除后续流程（保留原始证据）</label>
-        </fieldset>
+        </fieldset>`}
       </article>`).join("")}</div>
     <div class="ocr-review-actions"><button type="button" data-ocr-stop>停止本次流程</button>
       <button type="button" class="button button-primary" data-ocr-continue disabled>继续后续流程</button>
@@ -498,12 +510,39 @@ function renderOcrReview(job, statusUrl) {
   const message = panel.querySelector(".ocr-review-message");
   function decisions() {
     return Object.fromEntries(items.flatMap((item, index) => {
+      if (item.issue_type === "table_split") return [];
       const checked = panel.querySelector(`input[name="ocr-decision-${index}"]:checked`);
       return checked ? [[item.issue_id, checked.value]] : [];
     }));
   }
-  panel.addEventListener("change", () => {
-    const count = Object.keys(decisions()).length;
+  function tableDecisions() {
+    return Object.fromEntries(items.flatMap((item, index) => {
+      if (item.issue_type !== "table_split") return [];
+      const card = panel.querySelector(`[data-ocr-issue="${CSS.escape(item.issue_id)}"]`);
+      const checked = card.querySelector(`input[name="ocr-decision-${index}"]:checked`);
+      if (!checked) return [];
+      const assignments = {};
+      for (const [contextIndex, candidate] of (item.context_candidates || []).entries()) {
+        const group = card.querySelector(`[data-context-index="${contextIndex}"]`);
+        const none = group.querySelector("[data-context-none]").checked;
+        const leaves = [...group.querySelectorAll("[data-context-leaf]:checked")]
+          .map(control => control.dataset.contextLeaf);
+        if (!none && !leaves.length && checked.value === "accept") return [];
+        assignments[candidate.region_id] = none ? [] : leaves;
+      }
+      return [[item.issue_id, { action: checked.value, context_assignments: assignments }]];
+    }));
+  }
+  panel.addEventListener("change", event => {
+    const group = event.target.closest?.("[data-context-index]");
+    if (group && event.target.checked) {
+      if (event.target.matches("[data-context-none]")) {
+        group.querySelectorAll("[data-context-leaf]").forEach(input => { input.checked = false; });
+      } else if (event.target.matches("[data-context-leaf]")) {
+        group.querySelector("[data-context-none]").checked = false;
+      }
+    }
+    const count = Object.keys(decisions()).length + Object.keys(tableDecisions()).length;
     panel.querySelector("[data-ocr-review-count]").textContent = `已决定 ${count} / ${items.length} 项`;
     continueButton.disabled = count !== items.length;
   });
@@ -511,11 +550,13 @@ function renderOcrReview(job, statusUrl) {
     panel.querySelectorAll("button, input").forEach(control => { control.disabled = true; });
     message.textContent = action === "stop" ? "正在停止流程…" : "正在保存审查决定并继续…";
     try {
-      await postJson(`${statusUrl}/ocr-review`, { action, decisions: decisions() });
+      await postJson(`${statusUrl}/ocr-review`, {
+        action, decisions: decisions(), table_decisions: tableDecisions(),
+      });
       message.textContent = action === "stop" ? "本次流程已停止。" : "审查决定已保存，后续流程正在运行。";
     } catch (error) {
       panel.querySelectorAll("button, input").forEach(control => { control.disabled = false; });
-      continueButton.disabled = Object.keys(decisions()).length !== items.length;
+      continueButton.disabled = Object.keys(decisions()).length + Object.keys(tableDecisions()).length !== items.length;
       message.textContent = error.message || "审查决定提交失败。";
     }
   }

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 import json
 import math
 from pathlib import Path
@@ -115,6 +115,9 @@ class OcrReviewIssue:
     flags: tuple[str, ...]
     raw_content: str
     recognized_content: str
+    issue_type: str = "region"
+    table_tree: dict[str, Any] | None = None
+    context_candidates: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -448,7 +451,7 @@ class PdfParser(DocumentParser):
             (page_result, float(analysis.page.width), float(analysis.page.height))
             for analysis, page_result in results
         )
-        if review_ocr and self.reject_low_confidence_ocr:
+        if review_ocr:
             issues = self._ocr_review_issues(page_data, path=path)
             if issues:
                 raise OcrReviewRequired(OcrReviewSession(
@@ -616,7 +619,14 @@ class PdfParser(DocumentParser):
             decision = review_decisions.get(issue_id) if review_decisions is not None else None
             if review_flags and decision == "exclude":
                 continue
-            if self.reject_low_confidence_ocr and review_flags and decision != "include":
+            if "TABLE_SPLIT_REVIEW_REQUIRED" in review_flags and decision != "include":
+                raise IngestionError(
+                    "TABLE_REVIEW_REQUIRED",
+                    f"Table {display_region} requires split review before chunking.",
+                    path=path,
+                )
+            region_flags = [flag for flag in review_flags if flag != "TABLE_SPLIT_REVIEW_REQUIRED"]
+            if self.reject_low_confidence_ocr and region_flags and decision != "include":
                 raise IngestionError(
                     "PDF_OCR_LOW_CONFIDENCE",
                     (
@@ -643,6 +653,8 @@ class PdfParser(DocumentParser):
                 f"page_{result.page_number:04d}_ocr_"
                 f"{region.region_type}_{region_index:03d}"
             )
+            if region.table_tree_id:
+                parent = region.region_id
             sort_prefix = (float(region.reading_order), bbox[0])
 
             if region.region_type == "text":
@@ -691,6 +703,9 @@ class PdfParser(DocumentParser):
                     **dict(region.table.metadata),
                     "ocr_region_id": region.region_id,
                 }
+                if region.table_tree_id:
+                    metadata["table_tree_id"] = region.table_tree_id
+                    metadata["parent_table_region_id"] = region.parent_region_id
                 rows = [list(row) for row in region.table.rows]
                 groups = [(1, len(rows), rows)] if rows else []
                 if not groups:
@@ -786,6 +801,36 @@ class PdfParser(DocumentParser):
     ) -> tuple[OcrReviewIssue, ...]:
         issues: list[OcrReviewIssue] = []
         for page_index, (result, width, height) in enumerate(pages):
+            for tree in result.table_trees:
+                if not tree.review_required:
+                    continue
+                root = next(node for node in tree.nodes if node.node_id == tree.root_id)
+                root_region = OcrRegion(
+                    region_id=root.node_id, region_type="table", layout_label="table",
+                    bbox_pixels=root.bbox_pixels, reading_order=0,
+                )
+                bbox = self._ocr_bbox_to_pdf(
+                    root_region, image_width=result.image_width, image_height=result.image_height,
+                    page_width=width, page_height=height, path=path, page=result.page_number,
+                )
+                candidates = tuple({
+                    "region_id": region.region_id,
+                    "text": region.text,
+                    "bbox_pixels": region.bbox_pixels,
+                } for region in result.regions if region.region_type == "text" and region.text)
+                issues.append(OcrReviewIssue(
+                    issue_id=f"p{result.page_number:04d}-table-{tree.root_id}",
+                    page=result.page_number, page_index=page_index,
+                    number=tree.root_id, block_id=tree.root_id, label="table",
+                    region_type="table", bbox=bbox, confidence=root.confidence,
+                    flags=tree.review_reasons,
+                    raw_content=json.dumps(asdict(root), ensure_ascii=False, indent=2),
+                    recognized_content=json.dumps({"leaf_ids": tree.leaf_ids,
+                        "leaves": [asdict(node) for node in tree.nodes if node.node_id in tree.leaf_ids]},
+                        ensure_ascii=False, indent=2),
+                    issue_type="table_split", table_tree=asdict(tree),
+                    context_candidates=candidates,
+                ))
             for index, region in enumerate(result.regions, 1):
                 number = f"R{region.source_region_index or index}"
                 confidence = (self._normalized_ocr_confidence(
@@ -793,7 +838,8 @@ class PdfParser(DocumentParser):
                     display_region=number,
                 ) if region.confidence is not None else None)
                 flags = self._ocr_review_flags(region, confidence)
-                if not flags:
+                flags = [flag for flag in flags if flag != "TABLE_SPLIT_REVIEW_REQUIRED"]
+                if not self.reject_low_confidence_ocr or not flags:
                     continue
                 bbox = self._ocr_bbox_to_pdf(
                     region, image_width=result.image_width, image_height=result.image_height,
@@ -816,12 +862,52 @@ class PdfParser(DocumentParser):
         self,
         session: OcrReviewSession,
         decisions: Mapping[str, str],
+        table_decisions: Mapping[str, Mapping[str, Any]] | None = None,
     ) -> RawDocument:
-        expected = {issue.issue_id for issue in session.issues}
+        table_decisions = table_decisions or {}
+        expected = {issue.issue_id for issue in session.issues if issue.issue_type == "region"}
         if set(decisions) != expected or any(value not in {"include", "exclude"} for value in decisions.values()):
             raise ValueError("Every OCR issue needs exactly one include/exclude decision")
+        table_issues = {issue.issue_id: issue for issue in session.issues if issue.issue_type == "table_split"}
+        if set(table_decisions) != set(table_issues):
+            raise ValueError("Every table split issue needs a decision")
         pending: list[_PendingBlock] = []
         for result, width, height in session.pages:
+            regions = list(result.regions)
+            trees = list(result.table_trees)
+            for tree_index, tree in enumerate(trees):
+                if not tree.review_required:
+                    continue
+                issue_id = f"p{result.page_number:04d}-table-{tree.root_id}"
+                decision = table_decisions[issue_id]
+                action = decision.get("action")
+                if action not in {"accept", "exclude"}:
+                    raise ValueError("A table decision must accept or exclude")
+                if action == "accept" and "TABLE_SPLIT_GEOMETRY_CONFLICT" in tree.review_reasons:
+                    raise ValueError("A conflicting table split cannot be accepted")
+                assignments = decision.get("context_assignments", {})
+                candidate_ids = {item["region_id"] for item in table_issues[issue_id].context_candidates}
+                if set(assignments) != candidate_ids:
+                    raise ValueError("Assign every table context candidate explicitly")
+                if any(set(targets) - set(tree.leaf_ids) for targets in assignments.values()):
+                    raise ValueError("Unknown leaf table in context assignment")
+                trees[tree_index] = replace(tree, review_status="accepted" if action == "accept" else "excluded",
+                    context_assignments={key: tuple(value) for key, value in assignments.items()})
+                revised = []
+                for region in regions:
+                    if region.table_tree_id != tree.tree_id:
+                        revised.append(region)
+                    elif action == "accept":
+                        metadata = {**dict(region.table.metadata),
+                            "context_region_ids": [source for source, targets in assignments.items()
+                                if region.region_id in targets],
+                            "table_review_issue_id": issue_id,
+                        }
+                        revised.append(replace(region, table=replace(region.table, metadata=metadata),
+                            quality_flags=tuple(flag for flag in region.quality_flags
+                                if flag != "TABLE_SPLIT_REVIEW_REQUIRED")))
+                regions = revised
+            result = replace(result, regions=tuple(regions), table_trees=tuple(trees))
             pending.extend(self._ocr_blocks(
                 result, page_width=width, page_height=height, path=session.path,
                 source_quality_flags=session.source_quality_flags,
@@ -885,6 +971,12 @@ class PdfParser(DocumentParser):
             return overlap / max(a.bbox[2] - a.bbox[0], 1.0) >= 0.5
 
         for table in (r for r in ordered if r.block_type == "table"):
+            if table.content.get("table_tree_id"):
+                assigned = set(table.content.get("context_region_ids", []))
+                associated[table.region_id] = [r for r in text_regions if r.original_region_id in assigned]
+                # An assigned text region may be shared by several leaves; remove it
+                # from standalone text blocks only after all associations are built.
+                continue
             candidates = sorted((r for r in text_regions if r.region_id not in owned
                 and r.bbox[3] <= table.bbox[1] and overlaps(r, table)), key=lambda r: r.bbox[3])
             if not candidates or table.bbox[1] - candidates[-1].bbox[3] > 24:
@@ -900,6 +992,9 @@ class PdfParser(DocumentParser):
                     context.insert(0, previous)
             associated[table.region_id] = context
             owned.update(r.region_id for r in context)
+
+        for table in (r for r in ordered if r.block_type == "table" and r.content.get("table_tree_id")):
+            owned.update(r.region_id for r in associated.get(table.region_id, []))
 
         output: list[_PendingBlock] = []
         body: list[_PendingBlock] = []
@@ -969,10 +1064,10 @@ class PdfParser(DocumentParser):
                 metadata["caption"] = str(context[-1].content)
                 if len(context) > 1:
                     metadata["context"] = [str(r.content) for r in context[:-1]]
-            if section:
+            if section and not region.content.get("table_tree_id"):
                 metadata["section_title"] = str(section.content)
             evidence_context = list(context)
-            if section and all(r.region_id != section.region_id for r in context):
+            if section and not region.content.get("table_tree_id") and all(r.region_id != section.region_id for r in context):
                 evidence_context.append(section)
             parts = (self._source_part(region), *(self._source_part(r, role="context") for r in evidence_context))
             evidence = self._combined_evidence([region, *evidence_context])

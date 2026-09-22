@@ -62,9 +62,15 @@ class TranslateRequest(CanonicalModel):
     schema_version: NonEmptyString = "0.1.0"
 
 
+class TableReviewDecision(CanonicalModel):
+    action: Literal["accept", "exclude"]
+    context_assignments: dict[str, list[str]] = Field(default_factory=dict)
+
+
 class OcrReviewDecisionRequest(CanonicalModel):
     action: Literal["continue", "stop"]
     decisions: dict[str, Literal["include", "exclude"]] = Field(default_factory=dict)
+    table_decisions: dict[str, TableReviewDecision] = Field(default_factory=dict)
 
 
 class TranslationTraceEvent(CanonicalModel):

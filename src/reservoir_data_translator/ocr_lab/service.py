@@ -25,6 +25,7 @@ from reservoir_data_translator.ingestion.ocr import (
     EngineDescriptor,
     OcrEngineRegistry,
     PaddleCompositeCropEngine,
+    register_paddle_components,
 )
 
 from .models import CropPreprocessing, CropRunRequest
@@ -92,6 +93,14 @@ def build_default_engine_registry() -> OcrEngineRegistry:
             ),
         ),
         paddle_factory,
+    )
+    register_paddle_components(
+        registry,
+        device=os.getenv("RESERVOIR_OCR_DEVICE", "gpu:0").strip() or "gpu:0",
+        layout_model=os.getenv("RESERVOIR_OCR_LAYOUT_MODEL", "PP-DocLayout_plus-L"),
+        text_detection_model=os.getenv("RESERVOIR_OCR_TEXT_DETECTION_MODEL", "PP-OCRv5_server_det"),
+        text_recognition_model=os.getenv("RESERVOIR_OCR_TEXT_RECOGNITION_MODEL", "PP-OCRv5_server_rec"),
+        subtable_model=os.getenv("RESERVOIR_OCR_SUBTABLE_MODEL", "PP-DocLayout_plus-L"),
     )
     return registry
 

@@ -24,17 +24,91 @@ from reservoir_data_translator.mappers import (
     PlatformMappingRegistry,
 )
 from reservoir_data_translator.ontology import OntologyRegistry
-from reservoir_data_translator.ingestion import OcrPageResult, OcrRegion, PaddleOcrBackend, PdfParser
+from reservoir_data_translator.ingestion import OcrEngine, OcrPageResult, OcrRegion, PaddleOcrBackend, PdfParser
+from reservoir_data_translator.ingestion.ocr.models import OcrTable, TableTree, TableTreeNode
 
 
-def test_default_pdf_parser_uses_lazy_paddle_backend(
+@pytest.mark.asyncio
+async def test_table_review_api_requires_explicit_split_and_context_decisions(
+    registry: OntologyRegistry, tmp_path,
+) -> None:
+    class Backend:
+        def analyze_page(self, image, *, page_number, languages):
+            width, height = image.size
+            root = (10, 50, width - 10, 150)
+            first = (10, 50, width / 2, 150)
+            second = (width / 2, 50, width - 10, 150)
+            table = OcrTable(["name", "value"], [["water", "1"]])
+            tree = TableTree("parent:tree", "parent", (
+                TableTreeNode("parent", None, root, 0, "split",
+                    ("parent.1", "parent.2"), table=table),
+                TableTreeNode("parent.1", "parent", first, 1, "leaf", table=table),
+                TableTreeNode("parent.2", "parent", second, 1, "leaf", table=table),
+            ), ("parent.1", "parent.2"), True,
+                ("TABLE_SPLIT_UNCALIBRATED", "TABLE_CONTEXT_REVIEW_REQUIRED"), "pending")
+            return OcrPageResult(page_number, width, height, (
+                OcrRegion("caption", "text", "table_title", (10, 10, 200, 40), 1,
+                    text="PVT", confidence=.99),
+                OcrRegion("parent.1", "table", "table", first, 2, table=table,
+                    confidence=.99, quality_flags=("TABLE_SPLIT_REVIEW_REQUIRED",),
+                    parent_region_id="parent", table_tree_id=tree.tree_id),
+                OcrRegion("parent.2", "table", "table", second, 2, table=table,
+                    confidence=.99, quality_flags=("TABLE_SPLIT_REVIEW_REQUIRED",),
+                    parent_region_id="parent", table_tree_id=tree.tree_id),
+            ), "fake", table_trees=(tree,))
+
+    image_bytes = BytesIO()
+    Image.new("RGB", (100, 100), "white").save(image_bytes, format="PNG")
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=letter)
+    pdf.drawImage(ImageReader(BytesIO(image_bytes.getvalue())), 0, 0,
+                  width=letter[0], height=letter[1])
+    pdf.save()
+    client = _configured_client(registry, APIWellProvider(), pdf_parser=PdfParser(
+        ocr_backend=Backend(), ocr_render_dpi=72, ocr_artifact_dir=tmp_path,
+    ))
+    submitted = await client.post("/translation-jobs", json={
+        "source": {"file_name": "table.pdf", "content_encoding": "base64",
+                   "content": base64.b64encode(buffer.getvalue()).decode("ascii")},
+        "target_platform": "cmg",
+    })
+    url = submitted.json()["status_url"]
+    for _ in range(150):
+        job = (await client.get(url)).json()
+        if job["status"] == "ocr_review_required":
+            break
+        await asyncio.sleep(.01)
+    assert job["status"] == "ocr_review_required", job
+    item = job["ocr_review"]["items"][0]
+    assert item["issue_type"] == "table_split"
+    assert item["table_tree"]["leaf_ids"] == ["parent.1", "parent.2"]
+    assert (await client.post(url + "/ocr-review", json={"action": "continue"})).status_code == 422
+    invalid = await client.post(url + "/ocr-review", json={
+        "action": "continue", "table_decisions": {item["issue_id"]: {
+            "action": "accept", "context_assignments": {"caption": ["unknown-leaf"]},
+        }},
+    })
+    assert invalid.status_code == 422
+    assert invalid.json()["detail"]["code"] == "OCR_TABLE_CONTEXT_INVALID"
+    stopped = await client.post(url + "/ocr-review", json={"action": "stop"})
+    assert stopped.status_code == 200
+
+
+def test_default_pdf_parser_uses_project_ocr_engine(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("RESERVOIR_OCR_BACKEND", raising=False)
     monkeypatch.delenv("RESERVOIR_OCR_DEVICE", raising=False)
     parser = _default_pdf_parser()
-    assert isinstance(parser.ocr_backend, PaddleOcrBackend)
-    assert parser.ocr_backend.device == "gpu:0"
+    assert isinstance(parser.ocr_backend, OcrEngine)
+    assert parser.ocr_backend.registry.get("layout", "paddle-layout").device == "gpu:0"
+    assert parser.ocr_backend.minimum_confidence == .70
+
+
+def test_project_ocr_engine_respects_configured_confidence_threshold(monkeypatch) -> None:
+    monkeypatch.setenv("RESERVOIR_OCR_BACKEND", "reservoir")
+    monkeypatch.setenv("RESERVOIR_OCR_MIN_CONFIDENCE", "0.83")
+    assert _default_pdf_parser().ocr_backend.minimum_confidence == .83
 
 
 def test_default_pdf_parser_respects_explicit_cpu_device(monkeypatch) -> None:

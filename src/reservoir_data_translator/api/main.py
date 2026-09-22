@@ -30,6 +30,7 @@ from reservoir_data_translator.ingestion import (
     IngestionError,
     OcrReviewRequired,
     OcrReviewSession,
+    OcrEngine,
     PaddleOcrBackend,
     PdfParser,
     RawDocument,
@@ -78,6 +79,7 @@ from .service import (
     UnknownSourceSystemError,
 )
 from reservoir_data_translator.ingestion.ocr.artifacts import artifact_root, progress_callback, publish
+from reservoir_data_translator.ingestion.ocr import DEFAULT_SELECTION, OcrEngineRegistry, register_paddle_components
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -140,10 +142,10 @@ def _default_services(
 
 
 def _default_pdf_parser() -> PdfParser:
-    backend_name = os.getenv("RESERVOIR_OCR_BACKEND", "paddleocr").strip().casefold()
+    backend_name = os.getenv("RESERVOIR_OCR_BACKEND", "reservoir").strip().casefold()
     if backend_name in {"", "none", "disabled", "off"}:
         return PdfParser()
-    if backend_name not in {"paddle", "paddleocr", "ppstructurev3"}:
+    if backend_name not in {"reservoir", "paddle", "paddleocr", "ppstructurev3"}:
         raise IngestionError(
             "PDF_OCR_BACKEND_UNSUPPORTED",
             f"Unsupported OCR backend {backend_name!r}.",
@@ -156,23 +158,38 @@ def _default_pdf_parser() -> PdfParser:
     minimum_confidence = float(
         os.getenv("RESERVOIR_OCR_MIN_CONFIDENCE", "0.70")
     )
-    backend = PaddleOcrBackend(
-        lang=os.getenv("RESERVOIR_OCR_LANG") or languages[0],
-        device=os.getenv("RESERVOIR_OCR_DEVICE", "gpu:0").strip() or "gpu:0",
-        paddlex_config=os.getenv("RESERVOIR_OCR_PADDLEX_CONFIG") or None,
-        minimum_confidence=minimum_confidence,
-        enable_mkldnn=(
-            os.getenv("RESERVOIR_OCR_ENABLE_MKLDNN", "false")
-            .strip()
-            .casefold()
-            in {"1", "true", "yes", "on"}
-        ),
-        cpu_threads=(
-            int(os.environ["RESERVOIR_OCR_CPU_THREADS"])
-            if os.getenv("RESERVOIR_OCR_CPU_THREADS")
-            else None
-        ),
-    )
+    device = os.getenv("RESERVOIR_OCR_DEVICE", "gpu:0").strip() or "gpu:0"
+    if backend_name == "reservoir":
+        component_registry = OcrEngineRegistry()
+        register_paddle_components(
+            component_registry, device=device,
+            layout_model=os.getenv("RESERVOIR_OCR_LAYOUT_MODEL", "PP-DocLayout_plus-L"),
+            text_detection_model=os.getenv("RESERVOIR_OCR_TEXT_DETECTION_MODEL", "PP-OCRv5_server_det"),
+            text_recognition_model=os.getenv("RESERVOIR_OCR_TEXT_RECOGNITION_MODEL", "PP-OCRv5_server_rec"),
+            subtable_model=os.getenv("RESERVOIR_OCR_SUBTABLE_MODEL", "PP-DocLayout_plus-L"),
+        )
+        backend = OcrEngine(
+            component_registry, DEFAULT_SELECTION,
+            minimum_confidence=minimum_confidence,
+        )
+    else:
+        backend = PaddleOcrBackend(
+            lang=os.getenv("RESERVOIR_OCR_LANG") or languages[0],
+            device=device,
+            paddlex_config=os.getenv("RESERVOIR_OCR_PADDLEX_CONFIG") or None,
+            minimum_confidence=minimum_confidence,
+            enable_mkldnn=(
+                os.getenv("RESERVOIR_OCR_ENABLE_MKLDNN", "false")
+                .strip()
+                .casefold()
+                in {"1", "true", "yes", "on"}
+            ),
+            cpu_threads=(
+                int(os.environ["RESERVOIR_OCR_CPU_THREADS"])
+                if os.getenv("RESERVOIR_OCR_CPU_THREADS")
+                else None
+            ),
+        )
     return PdfParser(
         ocr_backend=backend,
         ocr_render_dpi=int(os.getenv("RESERVOIR_OCR_RENDER_DPI", "300")),
@@ -916,12 +933,13 @@ def create_app(
     def save_ocr_review_decisions(
         task_id: str, session: OcrReviewSession, action: str,
         decisions: dict[str, str],
+        table_decisions: dict[str, dict],
     ) -> None:
         source_path = Path(session.artifact["local_path"])
         audit_path = source_path.with_suffix(".review.json")
         payload = {
             "task_id": task_id, "artifact_id": session.artifact["artifact_id"],
-            "action": action, "decisions": decisions,
+            "action": action, "decisions": decisions, "table_decisions": table_decisions,
             "reviewed_at": datetime.now(timezone.utc).isoformat(),
             "issues": [asdict(issue) for issue in session.issues],
         }
@@ -937,14 +955,26 @@ def create_app(
         if state is None or pending is None or state["status"] != "ocr_review_required":
             raise _http_error(409, "OCR_REVIEW_NOT_PENDING", "此任务当前没有待处理的 OCR 审查。")
         request, session = pending
-        expected = {issue.issue_id for issue in session.issues}
-        if not set(decision.decisions).issubset(expected):
+        expected = {issue.issue_id for issue in session.issues if issue.issue_type == "region"}
+        table_issues = {issue.issue_id: issue for issue in session.issues if issue.issue_type == "table_split"}
+        tables = {key: value.model_dump(mode="json") for key, value in decision.table_decisions.items()}
+        if not set(decision.decisions).issubset(expected) or not set(tables).issubset(table_issues):
             raise _http_error(422, "OCR_REVIEW_ITEM_UNKNOWN", "审查决定包含不属于此任务的区域。")
         if decision.action == "continue":
-            if set(decision.decisions) != expected:
+            if set(decision.decisions) != expected or set(tables) != set(table_issues):
                 raise _http_error(422, "OCR_REVIEW_INCOMPLETE", "请为每个 OCR 问题区域选择带入或排除。")
+            for issue_id, item in tables.items():
+                issue = table_issues[issue_id]
+                candidates = {candidate["region_id"] for candidate in issue.context_candidates}
+                leaves = set(issue.table_tree["leaf_ids"])
+                if set(item["context_assignments"]) != candidates or any(
+                    set(targets) - leaves for targets in item["context_assignments"].values()
+                ):
+                    raise _http_error(422, "OCR_TABLE_CONTEXT_INVALID", "请确认每项表格上下文的归属。")
+                if item["action"] == "accept" and "TABLE_SPLIT_GEOMETRY_CONFLICT" in issue.flags:
+                    raise _http_error(422, "OCR_TABLE_SPLIT_CONFLICT", "当前表格拆分边界冲突，不能直接确认。")
         try:
-            save_ocr_review_decisions(key, session, decision.action, decision.decisions)
+            save_ocr_review_decisions(key, session, decision.action, decision.decisions, tables)
         except OSError as exc:
             raise _http_error(500, "OCR_REVIEW_SAVE_FAILED", "无法保存 OCR 审查记录。") from exc
         session.artifact["review_url"] = f"/ocr-intermediates/{session.artifact['artifact_id']}/review"
@@ -952,25 +982,31 @@ def create_app(
             review_sessions.pop(key, None)
             state.update(status="stopped", stage="ocr_review", ocr_review={
                 **state["ocr_review"], "action": "stop", "decisions": decision.decisions,
+                "table_decisions": tables,
             })
             return {"task_id": key, "status": "stopped"}
 
         summary = {
-            "action": "continue", "decisions": decision.decisions,
+            "action": "continue", "decisions": decision.decisions, "table_decisions": tables,
             "included_count": sum(value == "include" for value in decision.decisions.values()),
             "excluded_count": sum(value == "exclude" for value in decision.decisions.values()),
-            "excluded_regions": [asdict(issue) for issue in session.issues
+            "accepted_table_count": sum(item["action"] == "accept" for item in tables.values()),
+            "excluded_table_count": sum(item["action"] == "exclude" for item in tables.values()),
+            "excluded_table_trees": [asdict(table_issues[issue_id]) for issue_id, item in tables.items()
+                                     if item["action"] == "exclude"],
+            "excluded_regions": [asdict(issue) for issue in session.issues if issue.issue_type == "region"
                                  if decision.decisions[issue.issue_id] == "exclude"],
         }
         state.update(status="queued", stage="ocr_review_resuming", ocr_review={
             **state["ocr_review"], "action": "continue", "decisions": decision.decisions,
+            "table_decisions": tables,
         })
 
         async def resume() -> None:
             try:
                 parser = service().pdf_parser
                 assert parser is not None
-                source = await asyncio.to_thread(parser.finalize_ocr_review, session, decision.decisions)
+                source = await asyncio.to_thread(parser.finalize_ocr_review, session, decision.decisions, tables)
                 result = await run_translation(
                     request, key, state, source_override=source, review_summary=summary,
                 )

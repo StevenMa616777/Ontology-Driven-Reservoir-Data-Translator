@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Any, Literal, Protocol
 
-from .models import OcrPageResult, PixelBoundingBox
+from .models import OcrPageResult, PixelBoundingBox, TableAnalysisResult
 
 
 EngineKind = Literal[
@@ -116,7 +116,7 @@ class TableEngine(Protocol):
         layout: LayoutResult,
         recognized_text: TextRecognitionResult,
         context: CropRunContext,
-    ) -> TableResult: ...
+    ) -> TableResult | TableAnalysisResult: ...
 
 
 class CompositeOcrEngine(Protocol):

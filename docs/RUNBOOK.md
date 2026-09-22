@@ -62,27 +62,28 @@ OCR/版面分析模型；生产环境应预先缓存模型，或用 PaddleX pipe
 
 ## 4. 扫描 PDF OCR 配置
 
-应用默认选择延迟加载的 PaddleOCR 后端，原生文本 PDF 不会触发模型加载。安装 OCR
+应用默认选择延迟加载的项目 `OcrEngine`，由独立注册的 Paddle 组件提供推理；原生文本 PDF 不会触发模型加载。安装 OCR
 依赖后，扫描件以及禁止文本提取但可渲染的 PDF 会自动进入 OCR：
 
 ```bash
 export RESERVOIR_OCR_LANGUAGES='ch,en'
 ```
 
-Windows PowerShell 对应写法为 `$env:RESERVOIR_OCR_BACKEND='paddleocr'`。
+Windows PowerShell 可使用 `$env:RESERVOIR_OCR_BACKEND='reservoir'` 显式选择项目引擎；
+`paddleocr` 保留为 PP-StructureV3 整套对照后端。
 
 可选环境变量：
 
 | 变量 | 默认值 | 作用 |
 |---|---:|---|
-| `RESERVOIR_OCR_BACKEND` | `paddleocr` | OCR 后端；仅运维紧急停用时设置为 `disabled` |
+| `RESERVOIR_OCR_BACKEND` | `reservoir` | 项目组件引擎；`paddleocr` 选旧整套基线，`disabled` 停用 |
 | `RESERVOIR_OCR_LANGUAGES` | `ch,en` | 写入提取证据的语言列表；首项作为 PaddleOCR `lang` |
 | `RESERVOIR_OCR_LANG` | 未设置 | 显式覆盖 PaddleOCR `lang` |
 | `RESERVOIR_OCR_DEVICE` | `gpu:0` | 默认第一个 NVIDIA CUDA GPU；可显式指定其他 GPU 或 `cpu` |
 | `RESERVOIR_OCR_RENDER_DPI` | `300` | PDF 页渲染分辨率 |
 | `RESERVOIR_OCR_MAX_PIXELS_PER_PAGE` | `40000000` | 单页像素预算 |
-| `RESERVOIR_OCR_MIN_CONFIDENCE` | `0.70` | 低质量标记阈值 |
-| `RESERVOIR_OCR_REJECT_LOW_CONFIDENCE` | `true` | 默认以 `PDF_OCR_LOW_CONFIDENCE` 阻断；为 false 时保留质量标记供审查 |
+| `RESERVOIR_OCR_MIN_CONFIDENCE` | `0.70` | 文字和表格低置信度标记阈值，适用于项目引擎及旧整套基线 |
+| `RESERVOIR_OCR_REJECT_LOW_CONFIDENCE` | `true` | 为 true 时低置信度区域进入异步 OCR 人工审查；为 false 时不生成这类区域审查项，表格结构审查仍独立触发 |
 | `RESERVOIR_OCR_PADDLEX_CONFIG` | 未设置 | 自定义 PP-StructureV3 pipeline 配置文件 |
 | `RESERVOIR_OCR_ENABLE_MKLDNN` | `false` | Windows 默认关闭以规避部分 oneDNN 算子兼容问题 |
 | `RESERVOIR_OCR_CPU_THREADS` | `8` | Paddle CPU 线程数 |
@@ -260,10 +261,11 @@ OCR Lab 只接受 PNG、JPEG、WebP 或 TIFF 图片 crop，不接受 PDF，也�
 拖动画框后只运行所选子区域。
 
 OCR Lab 不隐式选择 OCR 引擎。用户必须显式选择一个 composite baseline，或选择已经注册的
-Layout、Text Detection、Text Recognition、Table 组件组合。当前 PP-StructureV3 仅注册为
-`paddle-ppstructure-v3` 整体基线，其内部能力不会伪装成可独立替换的组件。
+Layout、Text Detection、Text Recognition、Table 组件组合。项目引擎已注册独立的 Paddle
+组件；原 PP-StructureV3 仍注册为 `paddle-ppstructure-v3` 整体基线。
 
-低置信度 OCR 人工审查卡会显示“送到 OCR Lab 测试”入口。该入口使用中间 clean-source PDF
+低置信度 OCR 人工审查卡会显示“送到 OCR Lab 测试”入口。表格结构与区域置信度审查项
+在同一次 OCR 审查会话中展示。该入口使用中间 clean-source PDF
 按原 OCR DPI 重建区域图像，并在 provenance 中标记为非原始内存像素。OCR Lab 会读取页面、
 原区域 bbox、扩边 bbox 和渲染 DPI；1× 以原文 100% 逻辑尺度显示，虚线框表示实际 OCR bbox。
 缩放滑条范围为 0.5×–3×、步长 0.5×，拖动只更新浏览器预览，不运行 OCR；点击运行后同一个

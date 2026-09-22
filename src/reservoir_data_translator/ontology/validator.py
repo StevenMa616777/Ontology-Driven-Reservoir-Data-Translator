@@ -129,7 +129,8 @@ class OntologyValidator:
 
         self._validate_cross_concept_aliases(concepts, issues)
         self._validate_inverse_relationships(concepts, concept_by_id, issues)
-        self._validate_tables(concepts, concept_by_id, issues)
+        # Table participation and coordinate/dependency roles are validated by
+        # ScopeRegistry; they are not universal properties of physical quantities.
 
         severity_order = {
             ValidationSeverity.ERROR: 0,
@@ -709,74 +710,6 @@ class OntologyValidator:
                                 f"relationships.{relation}",
                             )
                         )
-
-    def _validate_tables(
-        self,
-        concepts: Sequence[OntologyConcept],
-        concept_by_id: Mapping[str, OntologyConcept],
-        issues: list[OntologyIssue],
-    ) -> None:
-        coordinates_by_table: dict[str, set[str]] = {}
-        for concept in concepts:
-            for table_id in concept.relationships.get("coordinate_for", ()):
-                coordinates_by_table.setdefault(table_id, set()).add(concept.concept_id)
-                if concept.parent != table_id:
-                    issues.append(
-                        self._issue(
-                            ValidationSeverity.WARNING,
-                            "COORDINATE_TABLE_HIERARCHY_MISMATCH",
-                            f"Coordinate parent is {concept.parent!r}, not table {table_id!r}.",
-                            concept,
-                            "relationships.coordinate_for",
-                        )
-                    )
-
-        for table in (item for item in concepts if item.value_type == "table"):
-            coordinates = coordinates_by_table.get(table.concept_id, set())
-            if not coordinates:
-                issues.append(
-                    self._issue(
-                        ValidationSeverity.ERROR,
-                        "TABLE_COORDINATE_MISSING",
-                        "A table concept requires at least one coordinate_for relationship.",
-                        table,
-                        "relationships",
-                    )
-                )
-                continue
-            dependents = [
-                concept
-                for concept in concepts
-                if coordinates.intersection(concept.relationships.get("dependent_on", ()))
-            ]
-            if not dependents:
-                issues.append(
-                    self._issue(
-                        ValidationSeverity.ERROR,
-                        "TABLE_DEPENDENT_MISSING",
-                        "A table concept requires at least one variable dependent on its coordinate.",
-                        table,
-                        "relationships",
-                    )
-                )
-
-        for concept in concepts:
-            for coordinate_id in concept.relationships.get("dependent_on", ()):
-                coordinate = concept_by_id.get(coordinate_id)
-                if coordinate is None:
-                    continue
-                coordinate_tables = coordinate.relationships.get("coordinate_for", ())
-                if coordinate_tables and concept.parent not in coordinate_tables:
-                    issues.append(
-                        self._issue(
-                            ValidationSeverity.WARNING,
-                            "DEPENDENCY_TABLE_HIERARCHY_MISMATCH",
-                            f"Dependent parent {concept.parent!r} is not one of coordinate "
-                            f"tables {list(coordinate_tables)!r}.",
-                            concept,
-                            "relationships.dependent_on",
-                        )
-                    )
 
     @staticmethod
     def _issue(

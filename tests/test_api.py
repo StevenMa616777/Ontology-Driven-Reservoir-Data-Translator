@@ -33,23 +33,18 @@ async def test_ontology_graph_exposes_runtime_concepts_and_typed_edges(
     graph = response.json()
     assert graph["ontology"]["version"] == registry.metadata.version
     assert len(graph["nodes"]) == len(registry)
-    viscosity = next(node for node in graph["nodes"] if node["id"] == "fluid.oil.pvt.viscosity")
+    viscosity = next(node for node in graph["nodes"] if node["id"] == "physical.viscosity")
     assert viscosity["canonical_unit"] == "cP"
-    assert viscosity["relationships"]["dependent_on"] == ["fluid.oil.pvt.pressure"]
-    assert any(
-        edge["source"] == "fluid.oil.pvt"
-        and edge["target"] == "fluid.oil.pvt.viscosity"
-        and edge["type"] == "parent"
-        for edge in graph["edges"]
-    )
-    assert any(
-        edge["source"] == "fluid.oil.pvt.viscosity"
-        and edge["target"] == "fluid.oil.pvt.pressure"
-        and edge["type"] == "dependent_on"
-        for edge in graph["edges"]
-    )
-    pressure = next(node for node in graph["nodes"] if node["id"] == "fluid.oil.pvt.pressure")
-    assert {"source": "fluid.oil.pvt.viscosity", "type": "dependent_on"} in pressure["incoming_relationships"]
+    assert viscosity["relationships"] == {}
+    assert {binding["context"]["phase"] for binding in viscosity["scope_bindings"]} == {"oil", "water", "gas"}
+    oil = next(binding for binding in viscosity["scope_bindings"] if binding["context"]["phase"] == "oil")
+    assert oil["relationships"]["dependent_on"] == ["physical.pressure"]
+    assert oil["canonical_resolution"]["path_template"] == "fluids.oil.pvt.points[{point_index}].viscosity"
+    assert any(edge["source"] == "physical" and edge["target"] == "physical.viscosity"
+               and edge["type"] == "parent" for edge in graph["edges"])
+    assert {scope["id"] for scope in graph["scopes"]} >= {"pvt", "relative_permeability", "well_controls"}
+    ids = {node["id"] for node in graph["nodes"]}
+    assert all(edge["source"] in ids and edge["target"] in ids for edge in graph["edges"])
     await client.aclose()
 
 
@@ -60,11 +55,11 @@ async def test_ontology_concept_endpoint_returns_detail_and_404(
     app = create_app(registry=registry)
     client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
-    response = await client.get("/api/ontology/concepts/fluid.oil.density")
+    response = await client.get("/api/ontology/concepts/physical.density")
     missing = await client.get("/api/ontology/concepts/not.real")
 
     assert response.status_code == 200
-    assert response.json()["source_file"].endswith("fluid.yaml")
+    assert response.json()["source_file"].endswith("physical.yaml")
     assert missing.status_code == 404
     assert missing.json()["detail"]["code"] == "ONTOLOGY_CONCEPT_NOT_FOUND"
     await client.aclose()
@@ -419,6 +414,90 @@ async def test_translate_persists_and_exposes_deepseek_call_trace(
     assert (
         tmp_path / "deepseek-traces" / f'{trace["translation_id"]}.readable.log'
     ).is_file()
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_translate_failure_identifies_stage_and_exposes_llm_exchange(
+    registry: OntologyRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("DEEPSEEK_TRACE_DIR", str(tmp_path / "deepseek-traces"))
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        request_payload = json.loads(request.content)
+        assert "simulation duration" in request_payload["input"]
+        return httpx.Response(
+            400,
+            json={
+                "error": {
+                    "type": "invalid_request_error",
+                    "message": "Structured output request was rejected.",
+                }
+            },
+        )
+
+    provider = DeepSeekProvider(
+        "test-api-key",
+        transport=httpx.MockTransport(handler),
+    )
+    client = _configured_client(registry, provider)
+
+    response = await client.post(
+        "/translate",
+        json={
+            "source": "simulation duration 5 year",
+            "target_platform": "eclipse",
+        },
+    )
+
+    assert response.status_code == 502
+    detail = response.json()["detail"]
+    assert detail["code"] == "DEEPSEEK_API_ERROR"
+    diagnostics = detail["diagnostics"]
+    assert diagnostics["translation_id"]
+    assert diagnostics["failed_stage"] == "semantic_map"
+    assert diagnostics["completed_stages"] == ["ingest"]
+    assert diagnostics["location"] == {"source_block_id": "block_0001"}
+    assert [event["status"] for event in diagnostics["trace"]] == [
+        "success",
+        "failed",
+    ]
+    summary = diagnostics["deepseek_trace"]
+    assert summary["api_requests"] == 1
+
+    trace_response = await client.get(summary["trace_url"])
+    assert trace_response.status_code == 200
+    call = trace_response.json()["calls"][0]
+    assert call["request_payload"]["input"]
+    assert call["response_payload"]["error"]["type"] == "invalid_request_error"
+    assert "Authorization" not in call["request_payload"]
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_translate_generic_semantic_failure_returns_pipeline_diagnostics(
+    registry: OntologyRegistry,
+) -> None:
+    client = _configured_client(registry, FailingSemanticProvider())
+
+    response = await client.post(
+        "/translate",
+        json={
+            "source": "simulation duration 5 year",
+            "target_platform": "eclipse",
+        },
+    )
+
+    assert response.status_code == 502
+    detail = response.json()["detail"]
+    assert detail["code"] == "DEEPSEEK_TIMEOUT"
+    assert detail["diagnostics"]["failed_stage"] == "semantic_map"
+    assert detail["diagnostics"]["deepseek_trace"] is None
+    assert detail["diagnostics"]["trace"][-1]["detail"].startswith(
+        "DEEPSEEK_TIMEOUT:"
+    )
     await client.aclose()
 
 

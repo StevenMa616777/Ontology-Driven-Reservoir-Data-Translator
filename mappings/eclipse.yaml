@@ -4,19 +4,33 @@ dialect: "ECLIPSE_METRIC_OPM_2025.10_DEMO_INCLUDE"
 mappings:
   rock.compressibility:
     target_type: ROCK
-  rock.reference_pressure:
+  rock_reference_pressure:
+    concept_id: physical.pressure
+    semantic_context: {scope: rock, role: reference}
     target_type: ROCK
-  fluid.oil.density:
+  oil_density:
+    concept_id: physical.density
+    semantic_context: {scope: fluid_properties, phase: oil, role: property}
     target_type: DENSITY
-  fluid.water.density:
+  water_density:
+    concept_id: physical.density
+    semantic_context: {scope: fluid_properties, phase: water, role: property}
     target_type: DENSITY
-  fluid.gas.density:
+  gas_density:
+    concept_id: physical.density
+    semantic_context: {scope: fluid_properties, phase: gas, role: property}
     target_type: DENSITY
-  fluid.oil.pvt:
+  oil_pvt:
+    concept_id: fluid.pvt
+    semantic_context: {scope: pvt, phase: oil, role: model}
     target_type: PVDO
-  fluid.water.pvt:
+  water_pvt:
+    concept_id: fluid.pvt
+    semantic_context: {scope: pvt, phase: water, role: model}
     target_type: PVTW
-  fluid.gas.pvt:
+  gas_pvt:
+    concept_id: fluid.pvt
+    semantic_context: {scope: pvt, phase: gas, role: model}
     target_type: PVDG
   scal.relative_permeability:
     target_type: SWOF

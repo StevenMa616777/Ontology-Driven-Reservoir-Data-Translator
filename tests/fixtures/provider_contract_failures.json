@@ -1,0 +1,516 @@
+{
+  "table_id": {
+    "origin_trace_id": "582fba9f-f0e4-4284-a307-518ca4514bdb",
+    "response": {
+      "mappings": [
+        {
+          "status": "MAPPED",
+          "source_block_id": "block_0002",
+          "ontology_concept": "scal.relative_permeability",
+          "context": {
+            "scope": "relative_permeability",
+            "phase_system": "oil_water",
+            "role": "model"
+          },
+          "selectors": {
+            "table_id": "02_lab_B_相渗实验.txt"
+          },
+          "value": {
+            "phase_system": [
+              "oil",
+              "water"
+            ]
+          },
+          "confidence": 0.9
+        },
+        {
+          "status": "MAPPED",
+          "source_block_id": "block_0002",
+          "ontology_concept": "physical.water_saturation",
+          "context": {
+            "scope": "relative_permeability",
+            "phase": "water",
+            "phase_system": "oil_water",
+            "role": "coordinate"
+          },
+          "selectors": {
+            "table_id": "02_lab_B_相渗实验.txt",
+            "point_index": 0
+          },
+          "value": 15,
+          "source_unit": "%",
+          "canonical_unit": "fraction",
+          "confidence": 0.9
+        },
+        {
+          "status": "MAPPED",
+          "source_block_id": "block_0002",
+          "ontology_concept": "physical.relative_permeability",
+          "context": {
+            "scope": "relative_permeability",
+            "phase": "water",
+            "phase_system": "oil_water",
+            "role": "property"
+          },
+          "selectors": {
+            "table_id": "02_lab_B_相渗实验.txt",
+            "point_index": 0
+          },
+          "value": 0.0,
+          "source_unit": "fraction",
+          "canonical_unit": "fraction",
+          "confidence": 0.9
+        },
+        {
+          "status": "MAPPED",
+          "source_block_id": "block_0002",
+          "ontology_concept": "physical.relative_permeability",
+          "context": {
+            "scope": "relative_permeability",
+            "phase": "oil",
+            "phase_system": "oil_water",
+            "role": "property"
+          },
+          "selectors": {
+            "table_id": "02_lab_B_相渗实验.txt",
+            "point_index": 0
+          },
+          "value": 0.9,
+          "source_unit": "fraction",
+          "canonical_unit": "fraction",
+          "confidence": 0.9
+        },
+        {
+          "status": "MAPPED",
+          "source_block_id": "block_0002",
+          "ontology_concept": "physical.capillary_pressure",
+          "context": {
+            "scope": "relative_permeability",
+            "phase_system": "oil_water",
+            "role": "property"
+          },
+          "selectors": {
+            "table_id": "02_lab_B_相渗实验.txt",
+            "point_index": 0
+          },
+          "value": 35,
+          "source_unit": "kPa",
+          "canonical_unit": "bar",
+          "confidence": 0.9
+        },
+        {
+          "status": "MAPPED",
+          "source_block_id": "block_0002",
+          "ontology_concept": "physical.water_saturation",
+          "context": {
+            "scope": "relative_permeability",
+            "phase": "water",
+            "phase_system": "oil_water",
+            "role": "coordinate"
+          },
+          "selectors": {
+            "table_id": "02_lab_B_相渗实验.txt",
+            "point_index": 1
+          },
+          "value": 30,
+          "source_unit": "%",
+          "canonical_unit": "fraction",
+          "confidence": 0.9
+        },
+        {
+          "status": "MAPPED",
+          "source_block_id": "block_0002",
+          "ontology_concept": "physical.relative_permeability",
+          "context": {
+            "scope": "relative_permeability",
+            "phase": "water",
+            "phase_system": "oil_water",
+            "role": "property"
+          },
+          "selectors": {
+            "table_id": "02_lab_B_相渗实验.txt",
+            "point_index": 1
+          },
+          "value": 0.048,
+          "source_unit": "fraction",
+          "canonical_unit": "fraction",
+          "confidence": 0.9
+        },
+        {
+          "status": "MAPPED",
+          "source_block_id": "block_0002",
+          "ontology_concept": "physical.relative_permeability",
+          "context": {
+            "scope": "relative_permeability",
+            "phase": "oil",
+            "phase_system": "oil_water",
+            "role": "property"
+          },
+          "selectors": {
+            "table_id": "02_lab_B_相渗实验.txt",
+            "point_index": 1
+          },
+          "value": 0.552,
+          "source_unit": "fraction",
+          "canonical_unit": "fraction",
+          "confidence": 0.9
+        },
+        {
+          "status": "MAPPED",
+          "source_block_id": "block_0002",
+          "ontology_concept": "physical.capillary_pressure",
+          "context": {
+            "scope": "relative_permeability",
+            "phase_system": "oil_water",
+            "role": "property"
+          },
+          "selectors": {
+            "table_id": "02_lab_B_相渗实验.txt",
+            "point_index": 1
+          },
+          "value": 18,
+          "source_unit": "kPa",
+          "canonical_unit": "bar",
+          "confidence": 0.9
+        },
+        {
+          "status": "MAPPED",
+          "source_block_id": "block_0002",
+          "ontology_concept": "physical.water_saturation",
+          "context": {
+            "scope": "relative_permeability",
+            "phase": "water",
+            "phase_system": "oil_water",
+            "role": "coordinate"
+          },
+          "selectors": {
+            "table_id": "02_lab_B_相渗实验.txt",
+            "point_index": 2
+          },
+          "value": 50,
+          "source_unit": "%",
+          "canonical_unit": "fraction",
+          "confidence": 0.9
+        },
+        {
+          "status": "MAPPED",
+          "source_block_id": "block_0002",
+          "ontology_concept": "physical.relative_permeability",
+          "context": {
+            "scope": "relative_permeability",
+            "phase": "water",
+            "phase_system": "oil_water",
+            "role": "property"
+          },
+          "selectors": {
+            "table_id": "02_lab_B_相渗实验.txt",
+            "point_index": 2
+          },
+          "value": 0.205,
+          "source_unit": "fraction",
+          "canonical_unit": "fraction",
+          "confidence": 0.9
+        },
+        {
+          "status": "MAPPED",
+          "source_block_id": "block_0002",
+          "ontology_concept": "physical.relative_permeability",
+          "context": {
+            "scope": "relative_permeability",
+            "phase": "oil",
+            "phase_system": "oil_water",
+            "role": "property"
+          },
+          "selectors": {
+            "table_id": "02_lab_B_相渗实验.txt",
+            "point_index": 2
+          },
+          "value": 0.251,
+          "source_unit": "fraction",
+          "canonical_unit": "fraction",
+          "confidence": 0.9
+        },
+        {
+          "status": "MAPPED",
+          "source_block_id": "block_0002",
+          "ontology_concept": "physical.capillary_pressure",
+          "context": {
+            "scope": "relative_permeability",
+            "phase_system": "oil_water",
+            "role": "property"
+          },
+          "selectors": {
+            "table_id": "02_lab_B_相渗实验.txt",
+            "point_index": 2
+          },
+          "value": 7,
+          "source_unit": "kPa",
+          "canonical_unit": "bar",
+          "confidence": 0.9
+        },
+        {
+          "status": "MAPPED",
+          "source_block_id": "block_0002",
+          "ontology_concept": "physical.water_saturation",
+          "context": {
+            "scope": "relative_permeability",
+            "phase": "water",
+            "phase_system": "oil_water",
+            "role": "coordinate"
+          },
+          "selectors": {
+            "table_id": "02_lab_B_相渗实验.txt",
+            "point_index": 3
+          },
+          "value": 70,
+          "source_unit": "%",
+          "canonical_unit": "fraction",
+          "confidence": 0.9
+        },
+        {
+          "status": "MAPPED",
+          "source_block_id": "block_0002",
+          "ontology_concept": "physical.relative_permeability",
+          "context": {
+            "scope": "relative_permeability",
+            "phase": "water",
+            "phase_system": "oil_water",
+            "role": "property"
+          },
+          "selectors": {
+            "table_id": "02_lab_B_相渗实验.txt",
+            "point_index": 3
+          },
+          "value": 0.512,
+          "source_unit": "fraction",
+          "canonical_unit": "fraction",
+          "confidence": 0.9
+        },
+        {
+          "status": "MAPPED",
+          "source_block_id": "block_0002",
+          "ontology_concept": "physical.relative_permeability",
+          "context": {
+            "scope": "relative_permeability",
+            "phase": "oil",
+            "phase_system": "oil_water",
+            "role": "property"
+          },
+          "selectors": {
+            "table_id": "02_lab_B_相渗实验.txt",
+            "point_index": 3
+          },
+          "value": 0.048,
+          "source_unit": "fraction",
+          "canonical_unit": "fraction",
+          "confidence": 0.9
+        },
+        {
+          "status": "MAPPED",
+          "source_block_id": "block_0002",
+          "ontology_concept": "physical.capillary_pressure",
+          "context": {
+            "scope": "relative_permeability",
+            "phase_system": "oil_water",
+            "role": "property"
+          },
+          "selectors": {
+            "table_id": "02_lab_B_相渗实验.txt",
+            "point_index": 3
+          },
+          "value": 2,
+          "source_unit": "kPa",
+          "canonical_unit": "bar",
+          "confidence": 0.9
+        },
+        {
+          "status": "MAPPED",
+          "source_block_id": "block_0002",
+          "ontology_concept": "physical.water_saturation",
+          "context": {
+            "scope": "relative_permeability",
+            "phase": "water",
+            "phase_system": "oil_water",
+            "role": "coordinate"
+          },
+          "selectors": {
+            "table_id": "02_lab_B_相渗实验.txt",
+            "point_index": 4
+          },
+          "value": 90,
+          "source_unit": "%",
+          "canonical_unit": "fraction",
+          "confidence": 0.9
+        },
+        {
+          "status": "MAPPED",
+          "source_block_id": "block_0002",
+          "ontology_concept": "physical.relative_permeability",
+          "context": {
+            "scope": "relative_permeability",
+            "phase": "water",
+            "phase_system": "oil_water",
+            "role": "property"
+          },
+          "selectors": {
+            "table_id": "02_lab_B_相渗实验.txt",
+            "point_index": 4
+          },
+          "value": 0.8,
+          "source_unit": "fraction",
+          "canonical_unit": "fraction",
+          "confidence": 0.9
+        },
+        {
+          "status": "MAPPED",
+          "source_block_id": "block_0002",
+          "ontology_concept": "physical.relative_permeability",
+          "context": {
+            "scope": "relative_permeability",
+            "phase": "oil",
+            "phase_system": "oil_water",
+            "role": "property"
+          },
+          "selectors": {
+            "table_id": "02_lab_B_相渗实验.txt",
+            "point_index": 4
+          },
+          "value": 0.0,
+          "source_unit": "fraction",
+          "canonical_unit": "fraction",
+          "confidence": 0.9
+        },
+        {
+          "status": "MAPPED",
+          "source_block_id": "block_0002",
+          "ontology_concept": "physical.capillary_pressure",
+          "context": {
+            "scope": "relative_permeability",
+            "phase_system": "oil_water",
+            "role": "property"
+          },
+          "selectors": {
+            "table_id": "02_lab_B_相渗实验.txt",
+            "point_index": 4
+          },
+          "value": 0,
+          "source_unit": "kPa",
+          "canonical_unit": "bar",
+          "confidence": 0.9
+        }
+      ]
+    }
+  },
+  "control_type": {
+    "origin_trace_id": "ef8e87f3-5af8-4ebe-97e3-88181b8be0a9",
+    "response": {
+      "mappings": [
+        {
+          "status": "MAPPED",
+          "source_block_id": "block_0004",
+          "source_text": "C1",
+          "ontology_concept": "well",
+          "context": {
+            "scope": "well_controls",
+            "role": "entity"
+          },
+          "selectors": {
+            "well_id": "C1"
+          },
+          "value": "C1",
+          "confidence": 0.95
+        },
+        {
+          "status": "MAPPED",
+          "source_block_id": "block_0004",
+          "source_text": "INJECTOR",
+          "ontology_concept": "well.water_injector",
+          "context": {
+            "scope": "well_controls",
+            "role": "type"
+          },
+          "selectors": {
+            "well_id": "C1"
+          },
+          "value": "water_injector",
+          "confidence": 0.9
+        },
+        {
+          "status": "MAPPED",
+          "source_block_id": "block_0004",
+          "source_text": "800",
+          "ontology_concept": "well.control.water_injection_rate",
+          "context": {
+            "scope": "well_controls",
+            "role": "control"
+          },
+          "selectors": {
+            "well_id": "C1"
+          },
+          "value": 800,
+          "source_unit": "m3/day",
+          "canonical_unit": "m3/day",
+          "confidence": 0.9
+        },
+        {
+          "status": "MAPPED",
+          "source_block_id": "block_0004",
+          "source_text": "420",
+          "ontology_concept": "well.constraint.maximum_bhp",
+          "context": {
+            "scope": "well_controls",
+            "role": "constraint"
+          },
+          "selectors": {
+            "well_id": "C1",
+            "control_type": "INJECTION_RATE"
+          },
+          "value": 420,
+          "source_unit": "bar",
+          "canonical_unit": "bar",
+          "confidence": 0.9
+        },
+        {
+          "status": "UNMAPPED",
+          "source_block_id": "block_0004",
+          "source_text": "WATER",
+          "source_field": "fluid",
+          "candidate_concepts": [
+            "well.water_injector"
+          ],
+          "confidence": 0.0
+        },
+        {
+          "status": "UNMAPPED",
+          "source_block_id": "block_0004",
+          "source_text": "INJECTION_RATE",
+          "source_field": "controlMode",
+          "candidate_concepts": [
+            "well.control.water_injection_rate"
+          ],
+          "confidence": 0.0
+        },
+        {
+          "status": "UNMAPPED",
+          "source_block_id": "block_0004",
+          "source_text": "m3/day",
+          "source_field": "unit",
+          "candidate_concepts": [
+            "well.control.water_injection_rate"
+          ],
+          "confidence": 0.0
+        },
+        {
+          "status": "UNMAPPED",
+          "source_block_id": "block_0004",
+          "source_text": "bar",
+          "source_field": "pressureUnit",
+          "candidate_concepts": [
+            "well.constraint.maximum_bhp"
+          ],
+          "confidence": 0.0
+        }
+      ]
+    }
+  }
+}

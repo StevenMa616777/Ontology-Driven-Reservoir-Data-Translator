@@ -1,0 +1,154 @@
+concepts:
+- concept_id: physical
+  name: Physical Quantities
+  parent: reservoir_simulation
+  description: Reusable physical quantities independent of phase, task scope, and storage representation.
+  value_type: object
+  dimension: null
+  canonical_unit: null
+  aliases:
+  - physical quantities
+  - 物理量
+  constraints: {}
+  relationships: {}
+- concept_id: physical.pressure
+  name: Pressure
+  parent: physical
+  description: Normal force per unit area; its use as a coordinate, reference, or other role
+    is declared in context.
+  value_type: float
+  dimension: pressure
+  canonical_unit: bar
+  aliases:
+  - pressure
+  - 压力
+  constraints:
+    exclusive_minimum: 0
+  relationships: {}
+- concept_id: physical.viscosity
+  name: Dynamic Viscosity
+  parent: physical
+  description: Dynamic resistance of a fluid to shear deformation.
+  value_type: float
+  dimension: dynamic_viscosity
+  canonical_unit: cP
+  aliases:
+  - viscosity
+  - dynamic viscosity
+  - 粘度
+  - 黏度
+  constraints:
+    exclusive_minimum: 0
+  relationships: {}
+- concept_id: physical.density
+  name: Density
+  parent: physical
+  description: Mass per unit volume under declared physical conditions.
+  value_type: float
+  dimension: density
+  canonical_unit: kg/m3
+  aliases:
+  - density
+  - mass density
+  - 密度
+  constraints:
+    exclusive_minimum: 0
+  relationships: {}
+- concept_id: physical.formation_volume_factor
+  name: Formation Volume Factor
+  parent: physical
+  description: Ratio of fluid volume at reservoir conditions to its volume at declared surface
+    conditions.
+  value_type: float
+  dimension: volume_ratio
+  canonical_unit: rm3/sm3
+  aliases:
+  - formation volume factor
+  - FVF
+  - 体积系数
+  constraints:
+    exclusive_minimum: 0
+  relationships: {}
+- concept_id: physical.compressibility
+  name: Fluid Compressibility
+  parent: physical
+  description: Relative fluid volume response to pressure at the declared thermodynamic conditions.
+  value_type: float
+  dimension: inverse_pressure
+  canonical_unit: 1/bar
+  aliases:
+  - fluid compressibility
+  - compressibility
+  - 流体压缩系数
+  constraints:
+    minimum: 0
+  relationships: {}
+- concept_id: physical.viscosibility
+  name: Viscosibility
+  parent: physical
+  description: Relative pressure derivative of dynamic viscosity under declared conditions.
+  value_type: float
+  dimension: inverse_pressure
+  canonical_unit: 1/bar
+  aliases:
+  - viscosibility
+  - 粘度压力系数
+  constraints: {}
+  relationships: {}
+- concept_id: physical.water_saturation
+  name: Water Saturation
+  parent: physical
+  description: Fraction of pore volume occupied by water.
+  value_type: float
+  dimension: dimensionless
+  canonical_unit: fraction
+  aliases:
+  - Sw
+  - water saturation
+  - water sat
+  - 含水饱和度
+  - 水饱和度
+  constraints:
+    minimum: 0
+    maximum: 1
+  relationships: {}
+- concept_id: physical.relative_permeability
+  name: Relative Permeability
+  parent: physical
+  description: Effective phase permeability divided by a declared reference permeability; phase
+    and phase system are context.
+  value_type: float
+  dimension: dimensionless
+  canonical_unit: fraction
+  aliases:
+  - relative permeability
+  - 相对渗透率
+  constraints:
+    minimum: 0
+    maximum: 1
+  relationships: {}
+- concept_id: physical.capillary_pressure
+  name: Capillary Pressure
+  parent: physical
+  description: Pressure difference between phases across a curved fluid interface; phase pair
+    and sign convention are contextual.
+  value_type: float
+  dimension: pressure
+  canonical_unit: bar
+  aliases:
+  - capillary pressure
+  - 毛管压力
+  constraints: {}
+  relationships: {}
+- concept_id: physical.temperature
+  name: Temperature
+  parent: physical
+  description: Thermodynamic temperature expressed on the declared scale.
+  value_type: float
+  dimension: temperature
+  canonical_unit: degC
+  aliases:
+  - temperature
+  - 温度
+  constraints: {}
+  relationships: {}

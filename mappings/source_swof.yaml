@@ -1,0 +1,9 @@
+mapping_version: "0.2.0"
+source_system: eclipse_swof_columns
+activation_terms: [SWOF, SWAT, KRW, KRO, PCOW]
+requires_pressure_unit: true
+instructions: "SWOF columns are water saturation, water relative permeability, oil relative permeability and capillary pressure. First three columns are fractions. Pressure units MUST come from source METRIC/FIELD or an explicit pressure unit; never infer source units from the export target. Missing source pressure units require UNMAPPED for capillary pressure."
+entries:
+  - source_term: SWAT
+    concept_id: physical.water_saturation
+    context: {scope: relative_permeability, role: coordinate, phase: water, phase_system: oil_water}

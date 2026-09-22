@@ -10,6 +10,7 @@ import yaml
 
 from .convention import OntologyConvention
 from .models import OntologyConcept
+from .scopes import ScopeRegistry
 from .validator import OntologyValidationResult, OntologyValidator
 
 
@@ -28,6 +29,7 @@ class OntologyMetadata:
     manifest_path: Path
     convention_path: Path
     convention_version: str
+    scope_path: Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +40,7 @@ class LoadedOntology:
     concepts: tuple[OntologyConcept, ...]
     convention: OntologyConvention
     validation: OntologyValidationResult
+    scopes: ScopeRegistry
 
 
 class OntologyLoader:
@@ -77,6 +80,11 @@ class OntologyLoader:
             ontology["convention_file"],
             label="Convention file",
         )
+        scope_path = cls._resolve_child_path(
+            ontology_root,
+            ontology["scope_file"],
+            label="Scope file",
+        )
         try:
             convention = OntologyConvention.from_mapping(
                 cls._read_yaml(convention_path)
@@ -94,6 +102,7 @@ class OntologyLoader:
             manifest_path=manifest_path,
             convention_path=convention_path,
             convention_version=convention.version,
+            scope_path=scope_path,
         )
 
         loaded_concepts: list[OntologyConcept] = []
@@ -130,7 +139,16 @@ class OntologyLoader:
                 f"Ontology convention validation failed with "
                 f"{len(validation.errors)} error(s):\n{details}"
             )
-        return LoadedOntology(metadata, concepts, convention, validation)
+        try:
+            scopes = ScopeRegistry.load(
+                scope_path,
+                {concept.concept_id for concept in concepts},
+                concepts=concepts,
+                convention=convention,
+            )
+        except ValueError as exc:
+            raise OntologyLoadError(f"Invalid semantic scopes in {scope_path}: {exc}") from exc
+        return LoadedOntology(metadata, concepts, convention, validation, scopes)
 
     @classmethod
     def _resolve_manifest(cls, path: Path) -> Path:
@@ -170,6 +188,7 @@ class OntologyLoader:
             "namespace",
             "domain",
             "convention_file",
+            "scope_file",
             "concept_files",
         }
         if not isinstance(ontology, dict):
@@ -182,13 +201,9 @@ class OntologyLoader:
         for field in ("name", "namespace", "domain"):
             if not isinstance(ontology[field], str) or not ontology[field].strip():
                 raise OntologyLoadError(f"ontology.{field} must be a non-empty string")
-        if (
-            not isinstance(ontology["convention_file"], str)
-            or not ontology["convention_file"].strip()
-        ):
-            raise OntologyLoadError(
-                "ontology.convention_file must be a non-empty path"
-            )
+        for path_field in ("convention_file", "scope_file"):
+            if not isinstance(ontology[path_field], str) or not ontology[path_field].strip():
+                raise OntologyLoadError(f"ontology.{path_field} must be a non-empty path")
         concept_files = ontology["concept_files"]
         if (
             not isinstance(concept_files, list)

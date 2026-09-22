@@ -1,7 +1,7 @@
 "use strict";
 
 const MAX_SOURCE_BYTES = 16 * 1024 * 1024;
-const TEXT_EXTENSIONS = new Set(["txt", "json", "csv"]);
+const TEXT_EXTENSIONS = new Set(["txt", "dat", "json", "csv"]);
 const state = {
   file: null,
   result: null,
@@ -23,13 +23,26 @@ const elements = {
 };
 
 class APIError extends Error {
-  constructor(code, message, status) {
+  constructor(code, message, status, diagnostics = null) {
     super(message);
     this.name = "APIError";
     this.code = code;
     this.status = status;
+    this.diagnostics = diagnostics;
   }
 }
+
+const PIPELINE_STAGE_LABELS = {
+  ingest: "源文件解析",
+  semantic_map: "语义映射 / LLM 调用",
+  review: "人工审查安全门",
+  human_review: "人工审查",
+  canonical_build: "Canonical 构建",
+  validation: "Canonical 规则验证",
+  target_mapper: "目标平台适配器",
+  export_validation: "目标平台导出验证",
+  render: "目标文件渲染",
+};
 
 function escapeHtml(value) {
   return String(value ?? "—")
@@ -69,7 +82,7 @@ function setSelectedFile(file) {
     return;
   }
   if (![...TEXT_EXTENSIONS, "xlsx", "pdf"].includes(extensionFor(file.name))) {
-    renderError("UNSUPPORTED_FILE", "当前仅支持 TXT、JSON、CSV、XLSX 和原生文本 PDF。");
+    renderError("UNSUPPORTED_FILE", "当前支持 TXT、文本 DAT、JSON、CSV、XLSX 和原生文本 PDF。");
     return;
   }
   state.file = file;
@@ -111,6 +124,7 @@ function openSelectedFile() {
   const extension = extensionFor(state.file.name);
   const previewTypes = {
     txt: "text/plain;charset=utf-8",
+    dat: "text/plain;charset=utf-8",
     json: "application/json;charset=utf-8",
     csv: "text/csv;charset=utf-8",
   };
@@ -146,6 +160,7 @@ async function postJson(path, body) {
       detail?.code || `HTTP_${response.status}`,
       detail?.message || "转换服务返回了无法解析的错误。",
       response.status,
+      detail?.diagnostics || null,
     );
   }
   return payload;
@@ -198,15 +213,54 @@ function renderLoading() {
     </div>`;
 }
 
-function renderError(code, message) {
-  updateRail(0);
+function pipelineStageLabel(stage) {
+  return PIPELINE_STAGE_LABELS[stage] || String(stage || "未知阶段").replaceAll("_", " ");
+}
+
+function pipelineRailIndex(stage) {
+  return {
+    ingest: 0,
+    semantic_map: 1,
+    review: 2,
+    human_review: 2,
+    canonical_build: 3,
+    validation: 3,
+    target_mapper: 4,
+    export_validation: 4,
+    render: 4,
+  }[stage] ?? 0;
+}
+
+function renderFailureLocation(location = {}) {
+  const items = [
+    location.source_block_id ? ["Source block", location.source_block_id] : null,
+    Number.isInteger(location.mapping_index) ? ["Mapping index", location.mapping_index] : null,
+    location.path ? ["Canonical / source path", location.path] : null,
+  ].filter(Boolean);
+  if (!items.length) return "";
+  return `<dl class="failure-location">${items.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd><code>${escapeHtml(value)}</code></dd></div>`).join("")}</dl>`;
+}
+
+function renderError(code, message, diagnostics = null) {
+  const failedStage = diagnostics?.failed_stage || "unknown";
+  const trace = diagnostics?.trace || [];
+  state.result = diagnostics ? {
+    translation_id: diagnostics.translation_id,
+    deepseek_trace: diagnostics.deepseek_trace,
+    trace,
+  } : null;
+  updateRail(pipelineRailIndex(failedStage));
   elements.resultRoot.className = "result-shell";
   elements.resultRoot.innerHTML = `
-    <div class="error-state" role="alert">
+    <div class="error-state ${diagnostics ? "error-state-diagnostic" : ""}" role="alert">
       <span class="error-mark">!</span>
-      <div><p class="eyebrow">${escapeHtml(code)}</p><h2>本次转换未完成</h2>
-      <p>${escapeHtml(message)}</p></div>
-    </div>`;
+      <div class="error-summary"><p class="eyebrow">${escapeHtml(code)}</p><h2>本次转换未完成</h2>
+      <p>${escapeHtml(message)}</p>
+      ${diagnostics ? `<div class="failure-stage"><span>阻断点</span><strong>${escapeHtml(pipelineStageLabel(failedStage))}</strong><small>转换 ID · ${escapeHtml(diagnostics.translation_id || "未生成")}</small></div>${renderFailureLocation(diagnostics.location)}` : ""}</div>
+    </div>
+    ${diagnostics ? `<section class="failure-diagnosis-section"><p class="step-label">PIPELINE DIAGNOSIS</p><h2>流程在这里停止</h2><p>前面的绿色阶段已经完成；红色阶段是本次阻断点。错误详情和位置保留在上方。</p><ol class="failure-trace">${renderTrace(trace)}</ol></section>` : ""}
+    ${renderDeepSeekTraceShell(diagnostics?.deepseek_trace)}`;
+  if (diagnostics) wireResultActions();
 }
 
 function reviewState(mapping) {
@@ -217,14 +271,16 @@ function reviewState(mapping) {
   return ["REVIEW_REQUIRED", "danger"];
 }
 
+function semanticContextLabel(context) { return context ? Object.values(context).filter(value => value != null).join(" · ") : ""; }
+
 function renderMapping(mapping, index) {
   const [label, tone] = reviewState(mapping);
   const confidence = Math.round((mapping.confidence || 0) * 100);
   const source = mapping.source_field || mapping.source_text || mapping.provenance?.raw_text || mapping.source_block_id;
   const destination = mapping.status === "MAPPED"
-    ? `<strong>${escapeHtml(mapping.ontology_concept)}</strong><code>${escapeHtml(mapping.canonical_path)}</code>`
+    ? `<strong>${escapeHtml(mapping.ontology_concept)}</strong><small>${escapeHtml(semanticContextLabel(mapping.context))}</small><code>${escapeHtml(mapping.canonical_path)}</code>`
     : mapping.status === "AMBIGUOUS"
-      ? `<strong>候选 Concept</strong><code>${escapeHtml(mapping.candidate_concepts.join(" · "))}</code>`
+      ? `<strong>候选 Concept</strong><code>${escapeHtml([...(mapping.candidate_concepts || []), ...(mapping.candidate_contexts || []).map(c => `${c.concept_id} (${semanticContextLabel(c.context)})`)].join(" · "))}</code>`
       : `<strong>未找到可验证 Concept</strong><code>DO NOT GUESS</code>`;
   const value = mapping.status === "MAPPED"
     ? `${escapeHtml(typeof mapping.value === "object" ? JSON.stringify(mapping.value) : mapping.value)} ${escapeHtml(mapping.canonical_unit || mapping.source_unit || "")}`
@@ -257,7 +313,7 @@ function renderReview(mappings, status) {
     <div class="review-item review-blocked">
       <span>${mapping.status}</span>
       <div><strong>${escapeHtml(mapping.source_field || mapping.source_text || mapping.source_block_id)}</strong>
-      <p>${mapping.status === "AMBIGUOUS" ? `候选：${escapeHtml(mapping.candidate_concepts.join("、"))}` : "Ontology 中没有可验证的映射，系统不会猜测。"}</p></div>
+      <p>${mapping.status === "AMBIGUOUS" ? `候选：${escapeHtml(mapping.candidate_concepts.join("、"))}` : escapeHtml(mapping.reason || "Ontology 中没有可验证的映射，系统不会猜测。")}</p></div>
     </div>`).join("");
   const reviewMarkup = lowConfidence.map(({ mapping, index }) => `
     <label class="review-item review-check">
@@ -299,11 +355,22 @@ function renderTrace(trace) {
     <li class="trace-${event.status}"><span>${String(index + 1).padStart(2, "0")}</span><div><strong>${escapeHtml(event.stage.replaceAll("_", " "))}</strong>${event.detail ? `<small>${escapeHtml(event.detail)}</small>` : ""}</div><b>${escapeHtml(event.status)}</b></li>`).join("");
 }
 
+function renderResultFailureDiagnosis(result) {
+  if (!["validation_failed", "export_failed"].includes(result.status)) return "";
+  const failedEvent = [...(result.trace || [])].reverse().find((event) => event.status === "failed");
+  const validation = result.status === "validation_failed" ? result.validation : result.export_validation;
+  const issues = validation?.errors || [];
+  return `<section class="result-failure-diagnosis" role="alert">
+    <div><p class="step-label">PIPELINE DIAGNOSIS</p><h2>阻断点：${escapeHtml(pipelineStageLabel(failedEvent?.stage))}</h2><p>${escapeHtml(failedEvent?.detail || "该阶段未通过，后续步骤没有执行。")}</p></div>
+    ${issues.length ? `<ul>${issues.slice(0, 5).map((issue) => `<li><code>${escapeHtml(issue.code)}</code><strong>${escapeHtml(issue.path || "<root>")}</strong><span>${escapeHtml(issue.message)}</span></li>`).join("")}</ul>` : ""}
+  </section>`;
+}
+
 function renderDeepSeekTraceShell(summary) {
   if (!summary) return "";
   return `<section class="deepseek-trace-section">
     <div class="deepseek-trace-heading">
-      <div><p class="step-label">DEEPSEEK API TRACE</p><h2>模型调用与 Token 明细 <small class="trace-ui-version">BLOCK DIAGNOSTICS V2</small></h2></div>
+      <div><p class="step-label">DEEPSEEK API TRACE</p><h2>LLM 请求、响应与 Token 明细 <small class="trace-ui-version">PIPELINE DIAGNOSTICS V3</small></h2></div>
       <button class="button button-secondary trace-toggle" type="button" data-toggle="deepseek-trace">显示调用明细</button>
     </div>
     <div class="trace-summary-grid">
@@ -497,14 +564,14 @@ function renderPromptSemanticView(call) {
     ? rawBlock.content
     : JSON.stringify(rawBlock.content, null, 2);
   const candidates = (prompt.input.ontology_candidates || []).map((candidate) => `
-    <li><strong>${escapeHtml(candidate.concept_id)}</strong><code>${escapeHtml(candidate.canonical_path_template)}</code><small>${escapeHtml(candidate.description || "")}</small></li>`).join("");
+    <li><strong>${escapeHtml(candidate.concept_id)}</strong><code>${escapeHtml(semanticContextLabel(candidate.context) || candidate.canonical_path_template)}</code><small>${escapeHtml(candidate.description || "")}</small></li>`).join("");
   return `<div class="trace-semantic-grid">
     <section><h5>映射范围</h5><dl><dt>证据 Block</dt><dd><code>${escapeHtml(prompt.input.mapping_scope?.source_block_id || rawBlock.block_id)}</code></dd><dt>规则</dt><dd>${escapeHtml(prompt.input.mapping_scope?.instruction || "仅映射当前 raw_block")}</dd></dl></section>
     <section><h5>原始证据</h5><pre>${escapeHtml(rawContent || "无内容")}</pre></section>
     <section class="trace-candidates"><h5>Ontology Candidates · ${(prompt.input.ontology_candidates || []).length}</h5><ul>${candidates || "<li>无候选概念</li>"}</ul></section>
     ${prompt.correction ? `<section class="trace-correction-instruction"><h5>CORRECTION REQUIRED</h5><pre>${escapeHtml(JSON.stringify(prompt.correction, null, 2))}</pre></section>` : ""}
     <details><summary>完整 System Prompt</summary><pre>${escapeHtml(prompt.system || "未提供。")}</pre></details>
-    <details><summary>完整 Canonical Schema</summary><pre>${escapeHtml(JSON.stringify(prompt.input.canonical_schema || {}, null, 2))}</pre></details>
+    <details><summary>检测到的作用域</summary><pre>${escapeHtml(JSON.stringify(prompt.input.detected_scopes || [], null, 2))}</pre></details>
   </div>`;
 }
 
@@ -612,6 +679,7 @@ function emptyStage(message) {
 function renderResult(result) {
   state.result = result;
   const mappings = result.semantic_mapping?.mappings || [];
+  const annotations = result.semantic_mapping?.source_annotations || [];
   const reviewRequired = result.status === "review_required";
   const railIndex = reviewRequired ? 2 : result.status === "success" ? 4 : 3;
   updateRail(railIndex);
@@ -633,9 +701,12 @@ function renderResult(result) {
       <div class="result-metrics"><span><b>${mappings.length}</b> 映射项</span><span><b>${unresolvedCount}</b> 未解决</span><span class="status-pill status-${statusCopy[1]}">${escapeHtml(result.status)}</span></div>
     </header>
 
+    ${renderResultFailureDiagnosis(result)}
+
     <section class="stage-section" id="source-result">
       <div class="stage-heading"><span class="stage-number">01</span><div><p class="step-label">SOURCE</p><h2>解析后的源资料</h2></div><span class="stage-meta">${escapeHtml(result.source?.file_name)} · ${escapeHtml(result.source?.source_type?.toUpperCase())} · ${result.source?.blocks?.length || 0} blocks</span></div>
       <div class="source-blocks">${renderBlocks(result.source)}</div>
+      ${annotations.length ? `<details class="source-annotations"><summary>已保留的来源说明与元数据 · ${annotations.length} 项</summary><p>这些内容用于来源追溯或已作为映射限定条件使用，不计为未解决的业务事实。</p>${annotations.map((item) => `<article><strong>${escapeHtml(item.source_block_id)} · ${escapeHtml(item.kind)}</strong><p>${escapeHtml(item.source_location || "")}${item.related_block_ids?.length ? ` → ${escapeHtml(item.related_block_ids.join(", "))}` : ""}</p><pre>${escapeHtml(typeof item.content === "string" ? item.content : JSON.stringify(item.content, null, 2))}</pre></article>`).join("")}</details>` : ""}
     </section>
 
     <section class="stage-section" id="semantic-result">
@@ -675,11 +746,14 @@ async function continueAfterReview() {
   setRunning(true);
   const continueButton = document.querySelector("#review-continue");
   if (continueButton) continueButton.textContent = "正在执行确定性构建…";
+  let activeStage = "canonical_build";
   try {
     const canonical = await postJson("/canonical/build", { mappings: mapped, schema_version: "0.1.0" });
+    activeStage = "validation";
     const validation = await postJson("/validate", { canonical_model: canonical });
     let exportResult = null;
     if (validation.valid) {
+      activeStage = "export_validation";
       exportResult = await postJson(`/export/${encodeURIComponent(targetPlatform)}`, { canonical_model: canonical });
     }
     const target = exportResult?.target || null;
@@ -702,7 +776,17 @@ async function continueAfterReview() {
     });
     document.querySelector("#canonical-result")?.scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (error) {
-    renderError(error.code || "REVIEW_CONTINUATION_FAILED", error.message || "人工审查后续流程执行失败。");
+    const code = error.code || "REVIEW_CONTINUATION_FAILED";
+    const message = error.message || "人工审查后续流程执行失败。";
+    const diagnostics = error.diagnostics || {
+      translation_id: state.result.translation_id,
+      failed_stage: activeStage,
+      completed_stages: (state.result.trace || []).filter((event) => event.status === "success").map((event) => event.stage),
+      trace: [...(state.result.trace || []), { stage: activeStage, status: "failed", detail: `${code}: ${message}` }],
+      deepseek_trace: state.result.deepseek_trace || null,
+      location: {},
+    };
+    renderError(code, message, diagnostics);
   } finally {
     setRunning(false);
   }
@@ -852,7 +936,11 @@ async function runTranslation() {
     renderResult(result);
     elements.resultRoot.scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (error) {
-    renderError(error.code || "TRANSLATION_FAILED", error.message || "转换过程中发生未知错误。");
+    renderError(
+      error.code || "TRANSLATION_FAILED",
+      error.message || "转换过程中发生未知错误。",
+      error.diagnostics || null,
+    );
   } finally {
     setRunning(false);
   }

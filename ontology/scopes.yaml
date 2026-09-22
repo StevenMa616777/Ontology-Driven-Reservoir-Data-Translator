@@ -1,0 +1,604 @@
+scopes:
+- scope_id: pvt
+  name: PVT
+  description: Pressure-volume-temperature properties of a declared fluid phase.
+  aliases:
+  - PVT
+  - pressure volume temperature
+  - fluid property table
+  - 流体PVT
+  phases:
+  - oil
+  - water
+  - gas
+  bindings:
+  - concept_id: fluid.pvt
+    context:
+      scope: pvt
+      phase: oil
+      role: model
+    aliases:
+    - oil PVT
+    - oil property table
+    - 油相PVT
+    - 原油PVT
+  - concept_id: physical.pressure
+    context:
+      scope: pvt
+      phase: oil
+      role: coordinate
+    aliases:
+    - oil PVT pressure
+    - oil pressure
+    - Po
+    - 油相PVT压力
+    relationships:
+      coordinate_for:
+      - fluid.pvt
+  - concept_id: physical.formation_volume_factor
+    context:
+      scope: pvt
+      phase: oil
+      role: property
+    aliases:
+    - oil formation volume factor
+    - oil FVF
+    - Bo
+    - 原油体积系数
+    - 油体积系数
+    relationships:
+      dependent_on:
+      - physical.pressure
+  - concept_id: physical.viscosity
+    context:
+      scope: pvt
+      phase: oil
+      role: property
+    aliases:
+    - oil viscosity
+    - mu oil
+    - MUO
+    - 油粘度
+    - 原油粘度
+    relationships:
+      dependent_on:
+      - physical.pressure
+  - concept_id: physical.compressibility
+    context:
+      scope: pvt
+      phase: oil
+      role: property
+    aliases:
+    - oil compressibility
+    relationships:
+      dependent_on:
+      - physical.pressure
+  - concept_id: physical.viscosibility
+    context:
+      scope: pvt
+      phase: oil
+      role: property
+    aliases:
+    - oil viscosibility
+    relationships:
+      dependent_on:
+      - physical.pressure
+  - concept_id: fluid.pvt
+    context:
+      scope: pvt
+      phase: water
+      role: model
+    aliases:
+    - water PVT
+    - water property table
+    - 水相PVT
+    - 地层水PVT
+  - concept_id: physical.pressure
+    context:
+      scope: pvt
+      phase: water
+      role: coordinate
+    aliases:
+    - water PVT pressure
+    - water pressure
+    - Pw
+    - 水相PVT压力
+    relationships:
+      coordinate_for:
+      - fluid.pvt
+  - concept_id: physical.formation_volume_factor
+    context:
+      scope: pvt
+      phase: water
+      role: property
+    aliases:
+    - water formation volume factor
+    - water FVF
+    - Bw
+    - 水体积系数
+    relationships:
+      dependent_on:
+      - physical.pressure
+  - concept_id: physical.viscosity
+    context:
+      scope: pvt
+      phase: water
+      role: property
+    aliases:
+    - water viscosity
+    - mu water
+    - MUW
+    - 水粘度
+    - 地层水粘度
+    relationships:
+      dependent_on:
+      - physical.pressure
+  - concept_id: physical.compressibility
+    context:
+      scope: pvt
+      phase: water
+      role: property
+    aliases:
+    - water compressibility
+    - Cw
+    - 地层水压缩系数
+    - 水压缩系数
+    relationships:
+      dependent_on:
+      - physical.pressure
+  - concept_id: physical.viscosibility
+    context:
+      scope: pvt
+      phase: water
+      role: property
+    aliases:
+    - water viscosibility
+    - Cv
+    - 地层水粘度压力系数
+    relationships:
+      dependent_on:
+      - physical.pressure
+  - concept_id: fluid.pvt
+    context:
+      scope: pvt
+      phase: gas
+      role: model
+    aliases:
+    - gas PVT
+    - gas property table
+    - 气相PVT
+    - 天然气PVT
+  - concept_id: physical.pressure
+    context:
+      scope: pvt
+      phase: gas
+      role: coordinate
+    aliases:
+    - gas PVT pressure
+    - gas pressure
+    - Pg
+    - 气相PVT压力
+    relationships:
+      coordinate_for:
+      - fluid.pvt
+  - concept_id: physical.formation_volume_factor
+    context:
+      scope: pvt
+      phase: gas
+      role: property
+    aliases:
+    - gas formation volume factor
+    - gas FVF
+    - Bg
+    - 气体体积系数
+    - 气体积系数
+    relationships:
+      dependent_on:
+      - physical.pressure
+  - concept_id: physical.viscosity
+    context:
+      scope: pvt
+      phase: gas
+      role: property
+    aliases:
+    - gas viscosity
+    - mu gas
+    - MUG
+    - 气体粘度
+    - 气相粘度
+    relationships:
+      dependent_on:
+      - physical.pressure
+  - concept_id: physical.compressibility
+    context:
+      scope: pvt
+      phase: gas
+      role: property
+    aliases:
+    - gas compressibility
+    relationships:
+      dependent_on:
+      - physical.pressure
+  - concept_id: physical.viscosibility
+    context:
+      scope: pvt
+      phase: gas
+      role: property
+    aliases:
+    - gas viscosibility
+    relationships:
+      dependent_on:
+      - physical.pressure
+- scope_id: fluid_properties
+  name: Fluid Properties
+  description: Fluid properties and their reference conditions.
+  aliases:
+  - fluid properties
+  - density
+  - fluid density
+  - 流体性质
+  - 密度
+  phases:
+  - oil
+  - water
+  - gas
+  bindings:
+  - concept_id: physical.density
+    context:
+      scope: fluid_properties
+      phase: oil
+      role: property
+    aliases:
+    - oil density
+    - crude oil density
+    - rho oil
+    - 油密度
+    - 原油密度
+    - 密度:油
+    relationships:
+      applies_to:
+      - fluid.oil
+  - concept_id: physical.density
+    context:
+      scope: fluid_properties
+      phase: water
+      role: property
+    aliases:
+    - water density
+    - brine density
+    - rho water
+    - 水密度
+    - 地层水密度
+    - 密度:水
+    relationships:
+      applies_to:
+      - fluid.water
+  - concept_id: physical.density
+    context:
+      scope: fluid_properties
+      phase: gas
+      role: property
+    aliases:
+    - gas density
+    - natural gas density
+    - rho gas
+    - 气体密度
+    - 气相密度
+    - 密度:气
+    relationships:
+      applies_to:
+      - fluid.gas
+- scope_id: relative_permeability
+  name: Relative Permeability
+  description: Relative permeability and capillary pressure in a declared phase system.
+  aliases:
+  - SCAL
+  - relative permeability
+  - relperm
+  - 相渗
+  - 相对渗透率
+  - 毛管压力
+  phases:
+  - oil
+  - water
+  bindings:
+  - concept_id: scal.relative_permeability
+    context:
+      scope: relative_permeability
+      role: model
+      phase_system: oil_water
+    aliases:
+    - relative permeability model
+    - relative permeability table
+    - 相渗模型
+    - 相渗表
+    - relative permeability
+    - relperm
+    - oil water relative permeability
+    - 油水相对渗透率
+    - 油水相渗
+  - concept_id: physical.water_saturation
+    context:
+      scope: relative_permeability
+      phase: water
+      role: coordinate
+      phase_system: oil_water
+    aliases:
+    - Sw
+    - water saturation
+    - water sat
+    - 含水饱和度
+    - 水饱和度
+    relationships:
+      coordinate_for:
+      - scal.relative_permeability
+  - concept_id: physical.relative_permeability
+    context:
+      scope: relative_permeability
+      phase: water
+      role: property
+      phase_system: oil_water
+    aliases:
+    - Krw
+    - water relative permeability
+    - water relperm
+    - 水相相对渗透率
+    - 水相相渗
+    relationships:
+      dependent_on:
+      - physical.water_saturation
+  - concept_id: physical.relative_permeability
+    context:
+      scope: relative_permeability
+      phase: oil
+      role: property
+      phase_system: oil_water
+    aliases:
+    - Kro
+    - Krow
+    - oil relative permeability
+    - oil relperm to water
+    - 油相相对渗透率
+    - 油相相渗
+    relationships:
+      dependent_on:
+      - physical.water_saturation
+  - concept_id: physical.capillary_pressure
+    context:
+      scope: relative_permeability
+      role: property
+      phase_system: oil_water
+    aliases:
+    - Pcow
+    - oil water capillary pressure
+    - capillary pressure oil water
+    - 油水毛管压力
+    - 毛管压力
+    relationships:
+      dependent_on:
+      - physical.water_saturation
+- scope_id: rock
+  name: Rock Properties
+  description: Pore-volume rock compressibility at a declared reference pressure.
+  aliases:
+  - rock
+  - rock properties
+  - 岩石
+  - 孔隙压缩系数
+  phases: []
+  bindings:
+  - concept_id: rock.compressibility
+    context:
+      scope: rock
+      role: property
+    aliases:
+    - rock compressibility
+    - pore compressibility
+    - CR
+    - 岩石压缩系数
+    - 孔隙压缩系数
+    relationships:
+      referenced_at:
+      - physical.pressure
+  - concept_id: physical.pressure
+    context:
+      scope: rock
+      role: reference
+    aliases:
+    - rock reference pressure
+    - reference pressure
+    - PREF
+    - 岩石参考压力
+    - 参考压力
+    relationships:
+      reference_for:
+      - rock.compressibility
+- scope_id: reference_condition
+  name: Reference Conditions
+  description: Pressure and temperature used to define a physical reference condition.
+  aliases:
+  - reference condition
+  - reference state
+  - 参考条件
+  - 参考状态
+  phases: []
+  bindings:
+  - concept_id: physical.pressure
+    context:
+      scope: reference_condition
+      role: reference
+    aliases:
+    - reference pressure condition
+    - condition pressure
+    - 参考条件压力
+    - 条件压力
+  - concept_id: physical.temperature
+    context:
+      scope: reference_condition
+      role: reference
+    aliases:
+    - reference temperature
+    - condition temperature
+    - 参考温度
+    - 条件温度
+- scope_id: well_controls
+  name: Well Controls
+  description: Well identity, operating roles, targets, and limits.
+  aliases:
+  - well controls
+  - well
+  - wells
+  - 井控
+  - 井
+  - 生产制度
+  phases: []
+  bindings:
+  - concept_id: well
+    context:
+      scope: well_controls
+      role: entity
+    aliases:
+    - well
+    - well name
+    - well ID
+    - 井
+    - 井名
+    - 井号
+  - concept_id: well.producer
+    context:
+      scope: well_controls
+      role: type
+    aliases:
+    - producer
+    - production well
+    - 生产井
+    - 采油井
+    - 生产
+  - concept_id: well.injector
+    context:
+      scope: well_controls
+      role: type
+    aliases:
+    - injector
+    - injection well
+    - 注入井
+    - 注井
+  - concept_id: well.water_injector
+    context:
+      scope: well_controls
+      role: type
+    aliases:
+    - water injector
+    - water injection well
+    - 注水井
+    - 水注入井
+    - 注水
+  - concept_id: well.gas_injector
+    context:
+      scope: well_controls
+      role: type
+    aliases:
+    - gas injector
+    - gas injection well
+    - 注气井
+    - 气注入井
+  - concept_id: well.control.liquid_rate
+    context:
+      scope: well_controls
+      role: control
+    aliases:
+    - liquid rate
+    - liquid production rate
+    - 定液
+    - 定液量
+    - 日产液
+    - 日产液量
+    relationships:
+      applies_to:
+      - well.producer
+  - concept_id: well.control.water_injection_rate
+    context:
+      scope: well_controls
+      role: control
+    aliases:
+    - water injection rate
+    - water rate target
+    - 注水量
+    - 日注水量
+    - 注水排量
+    - 注入量
+    - 定注入量
+    - 每天注
+    relationships:
+      applies_to:
+      - well.water_injector
+  - concept_id: well.constraint.minimum_bhp
+    context:
+      scope: well_controls
+      role: constraint
+    aliases:
+    - minimum BHP
+    - MinBHP
+    - BHP minimum
+    - pressure floor
+    - 最低井底流压
+    - 井底流压下限
+    - 井底流压降到
+    relationships:
+      applies_to:
+      - well.producer
+  - concept_id: well.constraint.maximum_bhp
+    context:
+      scope: well_controls
+      role: constraint
+    aliases:
+    - maximum BHP
+    - MaxBHP
+    - BHP maximum
+    - pressure ceiling
+    - 最高井底流压
+    - 井底压力上限
+    - 井底压力不要超过
+    relationships:
+      applies_to:
+      - well.injector
+- scope_id: schedule
+  name: Schedule
+  description: Simulation duration and report cadence.
+  aliases:
+  - schedule
+  - simulation time
+  - 模拟时间
+  - 模拟日程
+  phases: []
+  bindings:
+  - concept_id: schedule.duration
+    context:
+      scope: schedule
+      role: duration
+    aliases:
+    - simulation duration
+    - run duration
+    - total simulation time
+    - 模拟周期
+    - 模拟时长
+    - 模拟总时长
+    - 预测期
+    relationships:
+      configures:
+      - schedule
+  - concept_id: schedule.report_interval
+    context:
+      scope: schedule
+      role: report_interval
+    aliases:
+    - report interval
+    - report step
+    - reporting frequency
+    - 报告间隔
+    - 输出间隔
+    - 按季度出报
+    - 季度出报
+    relationships:
+      configures:
+      - schedule

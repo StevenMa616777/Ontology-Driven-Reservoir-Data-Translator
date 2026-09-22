@@ -16,7 +16,11 @@ from reservoir_data_translator.semantic.unit_normalizer import (
 )
 
 from .models import PhysicalValue, ReservoirSimulationModel
-from .mapping_contract import get_canonical_mapping_contract
+from .mapping_contract import (
+    SemanticResolutionError,
+    normalize_semantic_identity,
+    resolve_canonical_path,
+)
 
 if TYPE_CHECKING:
     from reservoir_data_translator.semantic.models import SemanticMapping
@@ -97,7 +101,27 @@ class CanonicalBuilder:
         }
         for index, mapping in enumerate(mappings):
             try:
-                concept = self._registry.get_concept(mapping.ontology_concept)
+                concept_id, context = normalize_semantic_identity(
+                    mapping.ontology_concept, mapping.context,
+                )
+            except SemanticResolutionError as exc:
+                # Preserve the useful unknown-ID diagnostic even when an
+                # invented concept also lacks a semantic context.
+                try:
+                    self._registry.get_concept(mapping.ontology_concept)
+                except KeyError:
+                    if exc.code == "SEMANTIC_CONTEXT_REQUIRED":
+                        raise CanonicalBuildError(
+                            "UNKNOWN_ONTOLOGY_CONCEPT",
+                            f"Unknown ontology concept {mapping.ontology_concept!r}",
+                            path=mapping.canonical_path, mapping_index=index,
+                        ) from exc
+                raise CanonicalBuildError(
+                    exc.code, str(exc), path=mapping.canonical_path,
+                    mapping_index=index,
+                ) from exc
+            try:
+                concept = self._registry.get_concept(concept_id)
             except KeyError as exc:
                 raise CanonicalBuildError(
                     "UNKNOWN_ONTOLOGY_CONCEPT",
@@ -106,24 +130,27 @@ class CanonicalBuilder:
                     mapping_index=index,
                 ) from exc
 
-            path_contract = get_canonical_mapping_contract(concept.concept_id)
-            if path_contract is None:
+            try:
+                self._registry.scopes.validate(concept_id, context)
+            except ValueError as exc:
                 raise CanonicalBuildError(
-                    "UNSUPPORTED_CANONICAL_MAPPING",
-                    f"Concept {concept.concept_id!r} has no v0.1 builder mapping",
-                    path=mapping.canonical_path,
-                    mapping_index=index,
+                    "INVALID_SEMANTIC_CONTEXT", str(exc),
+                    path=mapping.canonical_path, mapping_index=index,
+                ) from exc
+            try:
+                path = resolve_canonical_path(
+                    mapping.ontology_concept, mapping.context,
+                    mapping.selectors, mapping.canonical_path,
                 )
-            if not path_contract.accepts(mapping.canonical_path):
+            except SemanticResolutionError as exc:
                 raise CanonicalBuildError(
-                    "CANONICAL_PATH_MISMATCH",
-                    (
-                        f"Canonical path {mapping.canonical_path!r} is not valid for "
-                        f"concept {concept.concept_id!r}"
-                    ),
-                    path=mapping.canonical_path,
+                    exc.code, str(exc), path=mapping.canonical_path,
                     mapping_index=index,
-                )
+                ) from exc
+            mapping = mapping.model_copy(update={
+                "ontology_concept": concept_id, "context": context,
+                "canonical_path": path,
+            })
 
             try:
                 value = self._mapping_value(mapping, concept)
@@ -242,6 +269,25 @@ class CanonicalBuilder:
                 raise CanonicalBuildError(
                     "STRUCTURAL_VALUE_REQUIRED",
                     "Relative-permeability mapping must contain table metadata",
+                    path=mapping.canonical_path,
+                )
+            table_id = mapping.value.get("id")
+            if table_id is not None and table_id != selectors["relative_permeability"]:
+                raise CanonicalBuildError(
+                    "ENTITY_SELECTOR_MISMATCH",
+                    "Relative-permeability table ID disagrees with its selector",
+                    path=mapping.canonical_path,
+                )
+            phase_system = mapping.value.get("phase_system")
+            if (
+                not isinstance(phase_system, list)
+                or len(phase_system) != 2
+                or not all(isinstance(phase, str) for phase in phase_system)
+                or set(phase_system) != {"oil", "water"}
+            ):
+                raise CanonicalBuildError(
+                    "SEMANTIC_CONTEXT_CONFLICT",
+                    "Relative-permeability metadata must match the oil_water semantic context",
                     path=mapping.canonical_path,
                 )
         if concept.concept_id.endswith(".pvt") and not isinstance(

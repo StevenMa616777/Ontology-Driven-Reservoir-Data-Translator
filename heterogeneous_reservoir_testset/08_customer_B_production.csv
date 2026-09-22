@@ -1,0 +1,4 @@
+Field,Block,Well_No,Role,Operating_Target_bbl_d,BHP_Limit_psi,Limit_Type
+DemoField,Block01,A15,PROD,3144.7,1160.3,MIN
+DemoField,Block01,B2,PROD,3144.7,1160.3,MIN
+DemoField,Block01,C1,WINJ,5031.6,6091.6,MAX

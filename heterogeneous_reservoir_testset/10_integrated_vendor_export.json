@@ -1,0 +1,19 @@
+{
+  "rockFluid": {
+    "relativePermeability": {
+      "sourceSample": "X-12",
+      "saturationBasis": "fraction",
+      "rows": [
+        {"waterSat":0.15,"waterRelPerm":0.000,"oilRelPerm":0.900,"capPressure":35000,"capPressureUnit":"Pa"},
+        {"waterSat":0.30,"waterRelPerm":0.048,"oilRelPerm":0.552,"capPressure":18000,"capPressureUnit":"Pa"},
+        {"waterSat":0.50,"waterRelPerm":0.205,"oilRelPerm":0.251,"capPressure":7000,"capPressureUnit":"Pa"},
+        {"waterSat":0.70,"waterRelPerm":0.512,"oilRelPerm":0.048,"capPressure":2000,"capPressureUnit":"Pa"},
+        {"waterSat":0.90,"waterRelPerm":0.800,"oilRelPerm":0.000,"capPressure":0,"capPressureUnit":"Pa"}
+      ]
+    }
+  },
+  "schedule": {
+    "endDay":1825,
+    "outputEveryDays":91.25
+  }
+}

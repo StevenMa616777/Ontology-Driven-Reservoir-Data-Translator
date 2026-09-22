@@ -86,8 +86,180 @@ async def test_agent_accepts_structured_mapping_from_supplied_candidates(
     assert batch.mapped[0].provenance.extraction_method == "semantic_model:FakeProvider"
     prompt, response_model = provider.calls[0]
     assert "well.constraint.minimum_bhp" in prompt
-    assert "canonical_schema" in prompt
+    assert "canonical_schema" not in prompt
+    assert "entity_selectors" in prompt
     assert response_model.__name__ == "SemanticModelResponse"
+
+
+@pytest.mark.asyncio
+async def test_agent_retries_nested_physical_value_from_realistic_chinese_input(
+    registry: OntologyRegistry,
+) -> None:
+    block = RawBlock(
+        block_id="block_0001",
+        block_type="text",
+        content="A15井定液500方/天，最低井底流压80bar",
+        source_location="line 1",
+    )
+    common = [
+        {
+            "status": "MAPPED",
+            "source_text": "A15井",
+            "source_block_id": "block_0001",
+            "ontology_concept": "well",
+            "canonical_path": "wells[A15].id",
+            "value": "A15",
+            "confidence": 0.95,
+        },
+        {
+            "status": "MAPPED",
+            "source_text": "定液500方/天",
+            "source_block_id": "block_0001",
+            "ontology_concept": "well.control.liquid_rate",
+            "canonical_path": "wells[A15].controls[liquid_rate].target",
+            "value": 500,
+            "source_unit": "m3/day",
+            "canonical_unit": "m3/day",
+            "confidence": 0.95,
+        },
+        {
+            "status": "MAPPED",
+            "source_text": "最低井底流压80bar",
+            "source_block_id": "block_0001",
+            "ontology_concept": "well.constraint.minimum_bhp",
+            "canonical_path": (
+                "wells[A15].controls[liquid_rate]."
+                "constraints[minimum_bhp].value"
+            ),
+            "value": 80,
+            "source_unit": "bar",
+            "canonical_unit": "bar",
+            "confidence": 0.95,
+        },
+    ]
+    nested = [dict(mapping) for mapping in common]
+    nested[1]["value"] = {"value": 500, "unit": "m3/day"}
+    nested[2]["value"] = {"value": 80, "unit": "bar"}
+    provider = SequenceProvider(
+        [
+            {"mappings": nested},
+            {"mappings": common},
+        ]
+    )
+
+    result = await SemanticMappingAgent(registry, provider).map_document(
+        _document(block)
+    )
+
+    assert [mapping.value for mapping in result.mapped] == ["A15", 500.0, 80.0]
+    assert len(provider.prompts) == 2
+    assert "INVALID_STRUCTURED_OUTPUT" in provider.prompts[1]
+    prompt_payload = json.loads(provider.prompts[0].split("INPUT:\n", 1)[1])
+    liquid_rate = next(
+        candidate
+        for candidate in prompt_payload["ontology_candidates"]
+        if candidate["concept_id"] == "well.control.liquid_rate"
+    )
+    assert liquid_rate["value_contract"]["type"] == "number"
+    assert liquid_rate["value_contract"]["finite"] is True
+    assert "Never return a {value, unit} object" in liquid_rate["value_contract"][
+        "rule"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_agent_retries_numeric_string_for_physical_value(
+    registry: OntologyRegistry,
+) -> None:
+    block = RawBlock(
+        block_id="block_0001",
+        block_type="text",
+        content="Simulation duration is 5 years",
+    )
+    mapping = {
+        "status": "MAPPED",
+        "source_block_id": "block_0001",
+        "ontology_concept": "schedule.duration",
+        "canonical_path": "schedule.duration",
+        "source_unit": "year",
+        "canonical_unit": "day",
+        "confidence": 0.99,
+    }
+    provider = SequenceProvider(
+        [
+            {"mappings": [{**mapping, "value": "5"}]},
+            {"mappings": [{**mapping, "value": 5}]},
+        ]
+    )
+
+    result = await SemanticMappingAgent(registry, provider).map_document(
+        _document(block)
+    )
+
+    assert result.mapped[0].value == 5.0
+    assert "VALUE_OUTSIDE_CONTRACT" in provider.prompts[1]
+
+
+@pytest.mark.asyncio
+async def test_agent_retries_minimum_bhp_attached_to_wrong_control(
+    registry: OntologyRegistry,
+) -> None:
+    block = RawBlock(
+        block_id="block_0001",
+        block_type="text",
+        content="A15井定液500方/天，最低井底流压80bar",
+    )
+    mapping = {
+        "status": "MAPPED",
+        "source_block_id": "block_0001",
+        "ontology_concept": "well.constraint.minimum_bhp",
+        "value": 80,
+        "source_unit": "bar",
+        "canonical_unit": "bar",
+        "confidence": 0.95,
+    }
+    provider = SequenceProvider(
+        [
+            {
+                "mappings": [
+                    {
+                        **mapping,
+                        "canonical_path": (
+                            "wells[A15].controls[minimum_bhp]."
+                            "constraints[minimum_bhp].value"
+                        ),
+                    }
+                ]
+            },
+            {
+                "mappings": [
+                    {
+                        **mapping,
+                        "canonical_path": (
+                            "wells[A15].controls[liquid_rate]."
+                            "constraints[minimum_bhp].value"
+                        ),
+                    }
+                ]
+            },
+        ]
+    )
+
+    result = await SemanticMappingAgent(registry, provider).map_document(
+        _document(block)
+    )
+
+    assert "controls[liquid_rate]" in result.mapped[0].canonical_path
+    assert "CANONICAL_PATH_OUTSIDE_CONTRACT" in provider.prompts[1]
+    prompt_payload = json.loads(provider.prompts[0].split("INPUT:\n", 1)[1])
+    minimum_bhp = next(
+        candidate
+        for candidate in prompt_payload["ontology_candidates"]
+        if candidate["concept_id"] == "well.constraint.minimum_bhp"
+    )
+    assert minimum_bhp["entity_selectors"] == ["well_id"]
+    assert minimum_bhp["context"] == {"scope": "well_controls", "role": "constraint"}
+    assert "canonical_path_template" not in minimum_bhp
 
 
 @pytest.mark.asyncio
@@ -150,7 +322,7 @@ async def test_prompt_exposes_other_blocks_as_structure_without_their_content(
         },
     ]
     assert "SECRET_OTHER_BLOCK_FACT" not in prompt
-    assert "Every returned source_block_id must" in prompt
+    assert "with exactly its" in prompt
 
 
 @pytest.mark.asyncio
@@ -240,10 +412,8 @@ async def test_agent_preserves_ambiguous_state_for_supplied_candidates(
     batch = await SemanticMappingAgent(registry, provider).map_document(_document(block))
 
     assert isinstance(batch.mappings[0], AmbiguousSemanticMapping)
-    assert batch.mappings[0].candidate_concepts == [
-        "fluid.oil.density",
-        "fluid.water.density",
-    ]
+    assert batch.mappings[0].candidate_concepts == ["physical.density"]
+    assert {choice.context.phase for choice in batch.mappings[0].candidate_contexts} == {"oil", "water"}
     assert batch.mapped == []
 
 
@@ -362,7 +532,7 @@ async def test_agent_retries_structural_value_contract(
 
     assert result.mapped[0].value == {"model_type": "table"}
     assert len(provider.prompts) == 2
-    assert "STRUCTURAL_VALUE_OUTSIDE_CONTRACT" in provider.prompts[1]
+    assert "INVALID_STRUCTURED_OUTPUT" in provider.prompts[1]
 
 
 @pytest.mark.asyncio
@@ -405,29 +575,27 @@ async def test_agent_retries_missing_pvt_parent_mapping(
     )
 
     assert [mapping.ontology_concept for mapping in result.mapped] == [
-        "fluid.oil.pvt",
-        "fluid.oil.pvt.pressure",
+        "fluid.pvt", "physical.pressure",
     ]
+    assert result.mapped[1].selectors == {"point_index": 0}
+    assert all(mapping.context.phase == "oil" for mapping in result.mapped)
     assert len(provider.prompts) == 2
     assert "REQUIRED_STRUCTURAL_MAPPING_MISSING" in provider.prompts[1]
-    assert "Structural parent mappings are mandatory" in provider.prompts[0]
+    assert "matching" in provider.prompts[0]
     prompt_payload = json.loads(provider.prompts[0].split("INPUT:\n", 1)[1])
     prompt_candidates = prompt_payload["ontology_candidates"]
     oil_parent = next(
         candidate
         for candidate in prompt_candidates
-        if candidate["concept_id"] == "fluid.oil.pvt"
+        if candidate["concept_id"] == "fluid.pvt" and candidate["context"]["phase"] == "oil"
     )
     oil_pressure = next(
         candidate
         for candidate in prompt_candidates
-        if candidate["concept_id"] == "fluid.oil.pvt.pressure"
+        if candidate["concept_id"] == "physical.pressure" and candidate["context"]["phase"] == "oil"
     )
     assert prompt_payload["required_structural_parents"] == [
-        "fluid.oil.pvt",
-        "fluid.water.pvt",
-        "fluid.gas.pvt",
-        "scal.relative_permeability",
+        "fluid.pvt", "scal.relative_permeability",
     ]
     assert all(
         "required_parent_concept" not in candidate

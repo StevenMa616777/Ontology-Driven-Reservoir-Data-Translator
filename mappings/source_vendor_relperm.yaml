@@ -1,0 +1,17 @@
+mapping_version: "0.2.0"
+source_system: vendor_relperm_columns
+activation_terms: [waterSat, waterRelPerm, oilRelPerm, capPressure, capPressureUnit]
+instructions: "Oil-water relative permeability table. waterSat uses the declared saturationBasis (fraction or percent). Relative permeability is a ratio. capPressureUnit supplies the capPressure unit. Preserve the sibling sourceSample provided in source_context."
+entries:
+  - source_term: waterSat
+    concept_id: physical.water_saturation
+    context: {scope: relative_permeability, role: coordinate, phase: water, phase_system: oil_water}
+  - source_term: waterRelPerm
+    concept_id: physical.relative_permeability
+    context: {scope: relative_permeability, role: property, phase: water, phase_system: oil_water}
+  - source_term: oilRelPerm
+    concept_id: physical.relative_permeability
+    context: {scope: relative_permeability, role: property, phase: oil, phase_system: oil_water}
+  - source_term: capPressure
+    concept_id: physical.capillary_pressure
+    context: {scope: relative_permeability, role: property, phase_system: oil_water}

@@ -1,4 +1,7 @@
 # Ontology-Driven Reservoir Data Translator
+
+> **2026-09-20 实现更新**：Ontology、Scope、Canonical 已拆分。本文第 5、6、8–11、20 节的旧概念 ID、按父子前缀判表、向模型提供 canonical 路径等内容属于 v0.1 设计记录，当前合同以 [Ontology context 重构说明](docs/updates/2026-09-20-ontology-context-refactor.md) 和 [ONTOLOGY_CONVENTIONS.md](ONTOLOGY_CONVENTIONS.md) 为准；Canonical schema 及既有 demo 导出范围保留。
+
 ## 开发设计文档 v0.2
 
 > 本次修订重点收紧 Reservoir Simulation Ontology 的建模规范、受控词汇、

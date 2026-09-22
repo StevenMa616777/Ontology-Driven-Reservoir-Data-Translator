@@ -16,7 +16,7 @@ class TextParser(DocumentParser):
     """Split UTF-8 text into non-empty paragraph blocks with line provenance."""
 
     source_type = "txt"
-    suffixes = (".txt",)
+    suffixes = (".txt", ".dat")
 
     def parse(
         self,

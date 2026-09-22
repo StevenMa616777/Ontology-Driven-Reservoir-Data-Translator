@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from reservoir_data_translator.canonical import ReservoirSimulationModel
-from reservoir_data_translator.ontology import OntologyRegistry
+from reservoir_data_translator.ontology import OntologyRegistry, SemanticContext
 
 from .models import ValidationIssue, ValidationResult
 from .traversal import (
@@ -15,7 +15,7 @@ from .traversal import (
 
 
 class OntologyInstanceValidator:
-    """Check canonical units and applies-to relationships for case instances."""
+    """Check scoped participation, units, and applies-to case relationships."""
 
     def __init__(self, registry: OntologyRegistry) -> None:
         self._registry = registry
@@ -24,8 +24,50 @@ class OntologyInstanceValidator:
         errors: list[ValidationIssue] = []
         warnings: list[ValidationIssue] = []
 
+        for table_index, table in enumerate(model.scal.relative_permeability):
+            try:
+                self._registry.scopes.validate(
+                    "scal.relative_permeability",
+                    SemanticContext(
+                        scope="relative_permeability",
+                        role="model",
+                        phase_system="_".join(sorted(table.phase_system)) or None,
+                    ),
+                )
+            except ValueError as exc:
+                errors.append(
+                    ValidationIssue(
+                        code="ONTOLOGY_CONTEXT_ERROR",
+                        path=f"scal.relative_permeability[{table_index}].phase_system",
+                        message=str(exc),
+                        layer="ontology",
+                    )
+                )
+
         for observation in iter_physical_values(model):
-            concept = self._registry.get_concept(observation.concept_id)
+            try:
+                concept = self._registry.get_concept(observation.concept_id)
+            except KeyError:
+                errors.append(
+                    ValidationIssue(
+                        code="ONTOLOGY_CONCEPT_MISSING",
+                        path=observation.path,
+                        message=f"No ontology definition for {observation.concept_id!r}.",
+                        layer="ontology",
+                    )
+                )
+                continue
+            try:
+                self._registry.scopes.validate(observation.concept_id, observation.context)
+            except ValueError as exc:
+                errors.append(
+                    ValidationIssue(
+                        code="ONTOLOGY_CONTEXT_ERROR",
+                        path=observation.path,
+                        message=str(exc),
+                        layer="ontology",
+                    )
+                )
             if observation.value.unit != concept.canonical_unit:
                 errors.append(
                     ValidationIssue(

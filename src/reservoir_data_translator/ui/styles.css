@@ -315,6 +315,35 @@ select { width: 100%; height: 45px; padding: 0 12px; border: 1px solid var(--lin
 .loading-pulse, .error-mark { width: 42px; height: 42px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 50%; }
 .loading-pulse { border: 2px solid #c8d5d0; border-top-color: var(--green); animation: spin .9s linear infinite; }
 .error-mark { color: white; background: var(--danger); font-weight: 800; }
+.error-state-diagnostic { justify-content: flex-start; align-items: flex-start; }
+.error-summary { flex: 1; min-width: 0; }
+.failure-stage { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; max-width: 680px; margin-top: 20px; padding: 14px 16px; border-left: 4px solid var(--danger); background: #fff3f0; }
+.failure-stage span { color: var(--danger); font: 800 10px/1.4 ui-monospace, monospace; letter-spacing: .06em; text-transform: uppercase; }
+.failure-stage strong { color: var(--ink); }
+.failure-stage small { grid-column: 2; color: var(--muted); font: 11px/1.4 ui-monospace, monospace; }
+.failure-location { display: grid; gap: 1px; max-width: 680px; margin: 10px 0 0; border: 1px solid var(--line); background: var(--line); }
+.failure-location > div { display: grid; grid-template-columns: minmax(130px, .35fr) 1fr; gap: 12px; padding: 10px 13px; background: var(--surface); }
+.failure-location dt { color: var(--muted); }
+.failure-location dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.failure-diagnosis-section { padding: 26px clamp(22px, 3vw, 38px); border-top: 1px solid var(--line); background: #fffaf6; }
+.failure-diagnosis-section h2 { margin: 7px 0 8px; font: 500 22px/1.2 Georgia, "Songti SC", serif; }
+.failure-diagnosis-section > p:not(.step-label) { margin: 0; color: var(--muted); }
+.failure-trace { display: flex; gap: 0; margin: 18px 0 0; padding: 0; overflow-x: auto; list-style: none; }
+.failure-trace li { min-width: 190px; display: grid; grid-template-columns: auto 1fr; gap: 8px; padding: 12px; border-top: 3px solid var(--green); background: white; }
+.failure-trace li.trace-failed { border-top-color: var(--danger); background: #fff3f0; }
+.failure-trace li > span { color: var(--green); font: 700 10px/1 ui-monospace, monospace; }
+.failure-trace li.trace-failed > span { color: var(--danger); }
+.failure-trace li strong, .failure-trace li small { display: block; }
+.failure-trace li strong { font-size: 11px; text-transform: uppercase; }
+.failure-trace li small { margin-top: 5px; color: var(--muted); line-height: 1.5; }
+.failure-trace li > b { grid-column: 2; color: var(--green); font: 700 9px/1 ui-monospace, monospace; text-transform: uppercase; }
+.result-failure-diagnosis { display: grid; grid-template-columns: minmax(260px, .65fr) 1fr; gap: 24px; padding: 22px clamp(22px, 3vw, 38px); border-top: 1px solid #e2b7ae; border-bottom: 1px solid #e2b7ae; background: #fff3f0; }
+.result-failure-diagnosis h2 { margin: 7px 0; color: var(--danger); font: 500 22px/1.2 Georgia, "Songti SC", serif; }
+.result-failure-diagnosis p:not(.step-label) { margin: 0; color: #70433b; line-height: 1.6; }
+.result-failure-diagnosis ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.result-failure-diagnosis li { display: grid; grid-template-columns: auto minmax(100px, .4fr) 1fr; gap: 10px; padding: 10px 12px; border: 1px solid #efd0ca; background: white; font-size: 11px; }
+.result-failure-diagnosis li code { color: var(--danger); }
+.result-failure-diagnosis li span { color: var(--muted); }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* Readable defaults: supporting content should remain legible on high-DPI screens. */
@@ -374,6 +403,8 @@ select { width: 100%; height: 45px; padding: 0 12px; border: 1px solid var(--lin
 
 @media (max-width: 780px) {
   .topbar { height: auto; min-height: 68px; padding: 12px 20px; }
+  .result-failure-diagnosis { grid-template-columns: 1fr; }
+  .failure-location > div { grid-template-columns: 1fr; gap: 4px; }
   .system-badges .badge-success { display: none; }
   .system-badges .badge { display: none; }
   .readability-toggle { padding-inline: 8px; font-size: 0; }
@@ -407,3 +438,7 @@ select { width: 100%; height: 45px; padding: 0 12px; border: 1px solid var(--lin
   .trace-diff-panel li b { transform: rotate(90deg); }
   .trace-payloads { grid-template-columns: 1fr; }
 }
+:root .source-annotations { margin-top: 16px; padding: 14px; border: 1px solid var(--border, #d8dde3); border-radius: 10px; }
+:root .source-annotations summary { cursor: pointer; font-weight: 600; }
+:root .source-annotations article { margin-top: 12px; }
+:root .source-annotations pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }

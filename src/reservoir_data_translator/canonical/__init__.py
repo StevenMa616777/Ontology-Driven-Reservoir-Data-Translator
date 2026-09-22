@@ -3,8 +3,12 @@
 from .builder import CanonicalBuildError, CanonicalBuilder
 from .mapping_contract import (
     CanonicalMappingContract,
+    SemanticResolutionError,
     accepts_canonical_path,
     get_canonical_mapping_contract,
+    list_canonical_mapping_contracts,
+    normalize_semantic_identity,
+    resolve_canonical_path,
 )
 from .models import (
     CanonicalModel,
@@ -31,6 +35,7 @@ __all__ = [
     "CanonicalBuilder",
     "CanonicalModel",
     "CanonicalMappingContract",
+    "SemanticResolutionError",
     "FluidPhaseModel",
     "FluidSystemModel",
     "PVTModel",
@@ -49,5 +54,8 @@ __all__ = [
     "accepts_canonical_path",
     "generate_json_schemas",
     "get_canonical_mapping_contract",
+    "list_canonical_mapping_contracts",
+    "normalize_semantic_identity",
+    "resolve_canonical_path",
     "write_json_schemas",
 ]

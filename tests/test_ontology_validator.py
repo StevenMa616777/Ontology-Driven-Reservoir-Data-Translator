@@ -58,13 +58,13 @@ def test_validator_enforces_value_type_dimension_and_unit_vocabularies(
 ) -> None:
     concepts = _replace_concept(
         registry.list_concepts(),
-        "fluid.oil.pvt.viscosity",
+        "physical.viscosity",
         value_type="number",
         canonical_unit="Pa.s",
     )
     concepts = _replace_concept(
         concepts,
-        "fluid.water.density",
+        "physical.density",
         dimension="mass_density",
     )
 
@@ -82,8 +82,8 @@ def test_validator_enforces_concept_id_parent_hierarchy(
 ) -> None:
     concepts = _replace_concept(
         registry.list_concepts(),
-        "scal.relative_permeability.krw",
-        parent="fluid.oil.pvt",
+        "physical.relative_permeability",
+        parent="fluid.pvt",
     )
 
     result = _validate(registry, concepts)
@@ -96,9 +96,9 @@ def test_validator_enforces_relationship_vocabulary(
 ) -> None:
     concepts = _replace_concept(
         registry.list_concepts(),
-        "scal.relative_permeability.krw",
+        "physical.relative_permeability",
         relationships={
-            "depends_on": ("scal.relative_permeability.water_saturation",)
+            "depends_on": ("physical.water_saturation",)
         },
     )
 
@@ -113,7 +113,7 @@ def test_validator_enforces_relationship_endpoint_types(
     concepts = _replace_concept(
         registry.list_concepts(),
         "well.control.liquid_rate",
-        relationships={"applies_to": ("condition.reference.pressure",)},
+        relationships={"applies_to": ("physical.pressure",)},
     )
 
     result = _validate(registry, concepts)
@@ -131,8 +131,8 @@ def test_validator_detects_alias_values_duplicates_and_collisions(
     )
     concepts = _replace_concept(
         concepts,
-        "fluid.water.density",
-        aliases=("water density", "oil density"),
+        "physical.density",
+        aliases=("water density", "dynamic viscosity"),
     )
 
     result = _validate(registry, concepts)
@@ -145,18 +145,14 @@ def test_validator_detects_alias_values_duplicates_and_collisions(
     assert len(result.warnings) >= 2
 
 
-def test_validator_requires_table_coordinate_and_dependent_variables(
+def test_core_vocabulary_does_not_require_context_specific_table_edges(
     registry: OntologyRegistry,
 ) -> None:
-    concepts = _replace_concept(
-        registry.list_concepts(),
-        "scal.relative_permeability.water_saturation",
-        relationships={},
-    )
-
-    result = _validate(registry, concepts)
-
-    assert "TABLE_COORDINATE_MISSING" in _codes(result)
+    result = _validate(registry, registry.list_concepts())
+    assert result.valid
+    assert "TABLE_COORDINATE_MISSING" not in _codes(result)
+    assert registry.get_relationships("physical.pressure") == {}
+    assert registry.get_relationships("physical.viscosity") == {}
 
 
 def test_validator_requires_inverse_reference_relationship(
@@ -164,13 +160,8 @@ def test_validator_requires_inverse_reference_relationship(
 ) -> None:
     concepts = _replace_concept(
         registry.list_concepts(),
-        "condition.reference",
-        relationships={
-            "has_property": (
-                "condition.reference.pressure",
-                "condition.reference.temperature",
-            )
-        },
+        "rock.compressibility",
+        relationships={"referenced_at": ("physical.pressure",)},
     )
 
     result = _validate(registry, concepts)
@@ -183,7 +174,7 @@ def test_validator_rejects_invalid_constraints_and_version(
 ) -> None:
     concepts = _replace_concept(
         registry.list_concepts(),
-        "scal.relative_permeability.krw",
+        "physical.relative_permeability",
         constraints={"minimum": 1, "maximum": 0},
     )
 
@@ -226,7 +217,7 @@ def test_validator_detects_source_specific_concept_pollution(
 ) -> None:
     concepts = _replace_concept(
         registry.list_concepts(),
-        "rock.reference_pressure",
+        "physical.pressure",
         concept_id="eclipse.reference_pressure",
     )
 

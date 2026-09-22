@@ -27,6 +27,7 @@ from reservoir_data_translator.mappers import (
     PlatformMappingRegistry,
 )
 from reservoir_data_translator.ontology import OntologyRegistry
+from reservoir_data_translator.canonical.mapping_contract import get_canonical_mapping_contract
 from reservoir_data_translator.semantic import (
     DeepSeekCallTrace,
     DeepSeekProvider,
@@ -62,6 +63,17 @@ from .service import (
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 UI_ROOT = Path(__file__).resolve().parent.parent / "ui"
 DEFAULT_TRACE_ROOT = PROJECT_ROOT / "artifacts" / "deepseek_traces"
+UI_VERSION = "ontology-context-v4"
+
+
+class NoStoreStaticFiles(StaticFiles):
+    """Serve development UI assets without leaving stale scripts in the browser."""
+
+    async def get_response(self, path: str, scope: dict):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        response.headers["X-Reservoir-UI-Version"] = UI_VERSION
+        return response
 
 
 def _configured_path(environment_name: str, default_name: str) -> Path | None:
@@ -93,7 +105,7 @@ def _default_services(
             )
         if cmg_path.is_file():
             mappers.append(CMGDemoMapper(PlatformMappingRegistry.load(cmg_path, registry)))
-        for customer_path in sorted(mapping_path.glob("customer_*.yaml")):
+        for customer_path in sorted([*mapping_path.glob("customer_*.yaml"), *mapping_path.glob("source_*.yaml")]):
             source_mappings.append(
                 SourceMappingRegistry.load(customer_path, registry)
             )
@@ -128,7 +140,12 @@ def _default_semantic_provider() -> SemanticModelProvider | None:
 
 def _trace_root() -> Path:
     configured = os.getenv("DEEPSEEK_TRACE_DIR")
-    return Path(configured).expanduser() if configured else DEFAULT_TRACE_ROOT
+    if configured:
+        return Path(configured).expanduser()
+    # Installed wheels live under site-packages; their __file__ is not a project root.
+    if (Path.cwd() / "ontology" / "ontology_v0.1.yaml").is_file():
+        return Path.cwd() / "artifacts" / "deepseek_traces"
+    return DEFAULT_TRACE_ROOT
 
 
 def _persist_deepseek_trace(
@@ -221,6 +238,15 @@ def _readable_deepseek_log(payload: dict) -> str:
                 f"Error: {_readable_text(call.get('error_code'))} "
                 f"{_readable_text(call.get('error_message'))}"
             )
+            for detail in call.get("error_details") or []:
+                location = detail.get("location") or detail.get("path") or ["<root>"]
+                if isinstance(location, list):
+                    location = ".".join(str(part) for part in location)
+                lines.append(
+                    f"Error detail: {_readable_text(location)} "
+                    f"{_readable_text(detail.get('type'))} "
+                    f"{_readable_text(detail.get('message'))}"
+                )
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -277,15 +303,21 @@ def create_app(
         description="Ontology-driven staged reservoir data translation PoC.",
     )
     api.state.services = services
-    api.mount("/ui", StaticFiles(directory=UI_ROOT), name="ui")
+    api.mount("/ui", NoStoreStaticFiles(directory=UI_ROOT), name="ui")
 
     @api.get("/", include_in_schema=False)
     def workbench() -> FileResponse:
-        return FileResponse(UI_ROOT / "index.html")
+        return FileResponse(
+            UI_ROOT / "index.html",
+            headers={"Cache-Control": "no-store, max-age=0", "X-Reservoir-UI-Version": UI_VERSION},
+        )
 
     @api.get("/ontology", include_in_schema=False)
     def ontology_explorer() -> FileResponse:
-        return FileResponse(UI_ROOT / "ontology.html")
+        return FileResponse(
+            UI_ROOT / "ontology.html",
+            headers={"Cache-Control": "no-store, max-age=0", "X-Reservoir-UI-Version": UI_VERSION},
+        )
 
     def service() -> PipelineServices:
         configured = api.state.services
@@ -336,6 +368,19 @@ def create_app(
                         {"source": concept.concept_id, "type": relation}
                     )
 
+        for index, binding in enumerate(registry.scopes.bindings):
+            context = binding.context.model_dump(exclude_none=True)
+            for relation, targets in binding.relationships.items():
+                for target in targets:
+                    edges.append({
+                        "id": f"scope:{index}:{relation}:{target}",
+                        "source": binding.concept_id, "target": target,
+                        "type": relation, "context": context,
+                    })
+                    incoming[target].append({
+                        "source": binding.concept_id, "type": relation, "context": context,
+                    })
+
         nodes = []
         for concept in concepts:
             domain = (
@@ -359,6 +404,21 @@ def create_app(
                         relation: list(targets)
                         for relation, targets in concept.relationships.items()
                     },
+                    "scope_bindings": [
+                        {
+                            "context": binding.context.model_dump(exclude_none=True),
+                            "aliases": list(binding.aliases),
+                            "relationships": {key: list(targets) for key, targets in binding.relationships.items()},
+                            "canonical_resolution": (
+                                {"path_template": contract.path_template,
+                                 "selectors": list(contract.selector_names)}
+                                if (contract := get_canonical_mapping_contract(concept.concept_id, binding.context))
+                                else None
+                            ),
+                        }
+                        for binding in registry.scopes.bindings
+                        if binding.concept_id == concept.concept_id
+                    ],
                     "incoming_relationships": incoming[concept.concept_id],
                     "source_file": concept.source_file,
                     "status": concept.status,
@@ -384,6 +444,11 @@ def create_app(
                 "namespace": registry.metadata.namespace,
                 "domain": registry.metadata.domain,
             },
+            "scopes": [
+                {"id": scope.scope_id, "name": scope.name, "description": scope.description,
+                 "concepts": sorted({binding.concept_id for binding in scope.bindings})}
+                for scope in registry.scopes.list_scopes()
+            ],
             "nodes": nodes,
             "edges": edges,
             "relationship_types": relationship_types,
@@ -523,11 +588,27 @@ def create_app(
             source = services.ingest(request.source)
             trace.append(TranslationTraceEvent(stage="ingest", status="success"))
         except IngestionError as exc:
-            raise _http_error(422, exc.code, str(exc)) from exc
+            trace.append(
+                TranslationTraceEvent(
+                    stage="ingest",
+                    status="failed",
+                    detail=f"{exc.code}: {exc}",
+                )
+            )
+            raise _translation_http_error(
+                422,
+                exc.code,
+                str(exc),
+                translation_id=translation_id,
+                failed_stage="ingest",
+                trace=trace,
+                path=str(exc.path) if exc.path is not None else None,
+            ) from exc
 
         deepseek_calls: list[DeepSeekCallTrace] = []
         semantic_status = "failed"
         deepseek_trace_summary: DeepSeekTraceSummary | None = None
+        semantic_failure: tuple[int, str, str, Exception, str | None] | None = None
         try:
             with capture_deepseek_traces() as deepseek_calls:
                 semantic = await services.semantic_map(
@@ -539,13 +620,31 @@ def create_app(
                 TranslationTraceEvent(stage="semantic_map", status="success")
             )
         except SemanticProviderNotConfigured as exc:
-            raise _http_error(503, "SEMANTIC_PROVIDER_NOT_CONFIGURED", str(exc)) from exc
+            semantic_failure = (
+                503,
+                "SEMANTIC_PROVIDER_NOT_CONFIGURED",
+                str(exc),
+                exc,
+                None,
+            )
         except SemanticProviderError as exc:
-            raise _http_error(502, exc.code, str(exc)) from exc
+            semantic_failure = (502, exc.code, str(exc), exc, None)
         except UnknownSourceSystemError as exc:
-            raise _http_error(422, "SOURCE_MAPPING_NOT_CONFIGURED", str(exc)) from exc
+            semantic_failure = (
+                422,
+                "SOURCE_MAPPING_NOT_CONFIGURED",
+                str(exc),
+                exc,
+                None,
+            )
         except SemanticAgentContractError as exc:
-            raise _http_error(502, exc.code, str(exc)) from exc
+            semantic_failure = (
+                502,
+                exc.code,
+                str(exc),
+                exc,
+                exc.source_block_id,
+            )
         finally:
             deepseek_trace_summary = _persist_deepseek_trace(
                 translation_id,
@@ -553,6 +652,28 @@ def create_app(
                 deepseek_calls,
                 semantic_status=semantic_status,
             )
+
+        if semantic_failure is not None:
+            status_code, code, message, cause, source_block_id = semantic_failure
+            if source_block_id is None and deepseek_calls:
+                source_block_id = deepseek_calls[-1].source_block_id
+            trace.append(
+                TranslationTraceEvent(
+                    stage="semantic_map",
+                    status="failed",
+                    detail=f"{code}: {message}",
+                )
+            )
+            raise _translation_http_error(
+                status_code,
+                code,
+                message,
+                translation_id=translation_id,
+                failed_stage="semantic_map",
+                trace=trace,
+                deepseek_trace=deepseek_trace_summary,
+                source_block_id=source_block_id,
+            ) from cause
 
         if not semantic.mappings or semantic.review_required:
             low_confidence = sum(
@@ -586,13 +707,35 @@ def create_app(
                 TranslationTraceEvent(stage="canonical_build", status="success")
             )
         except CanonicalBuildError as exc:
-            raise _http_error(422, exc.code, str(exc)) from exc
+            trace.append(
+                TranslationTraceEvent(
+                    stage="canonical_build",
+                    status="failed",
+                    detail=f"{exc.code}: {exc}",
+                )
+            )
+            raise _translation_http_error(
+                422,
+                exc.code,
+                str(exc),
+                translation_id=translation_id,
+                failed_stage="canonical_build",
+                trace=trace,
+                deepseek_trace=deepseek_trace_summary,
+                path=exc.path,
+                mapping_index=exc.mapping_index,
+            ) from exc
 
         validation = services.validation.validate(canonical)
         trace.append(
             TranslationTraceEvent(
                 stage="validation",
                 status="success" if validation.valid else "failed",
+                detail=(
+                    None
+                    if validation.valid
+                    else _validation_failure_detail(validation)
+                ),
             )
         )
         if not validation.valid:
@@ -610,12 +753,32 @@ def create_app(
         try:
             mapper = services.mapper_registry.get(request.target_platform)
         except KeyError as exc:
-            raise _http_error(404, "PLATFORM_MAPPER_NOT_CONFIGURED", str(exc)) from exc
+            trace.append(
+                TranslationTraceEvent(
+                    stage="target_mapper",
+                    status="failed",
+                    detail=f"PLATFORM_MAPPER_NOT_CONFIGURED: {exc}",
+                )
+            )
+            raise _translation_http_error(
+                404,
+                "PLATFORM_MAPPER_NOT_CONFIGURED",
+                str(exc),
+                translation_id=translation_id,
+                failed_stage="target_mapper",
+                trace=trace,
+                deepseek_trace=deepseek_trace_summary,
+            ) from exc
         export_validation = mapper.validate_export(canonical)
         trace.append(
             TranslationTraceEvent(
                 stage="export_validation",
                 status="success" if export_validation.valid else "failed",
+                detail=(
+                    None
+                    if export_validation.valid
+                    else _validation_failure_detail(export_validation)
+                ),
             )
         )
         if not export_validation.valid:
@@ -634,7 +797,22 @@ def create_app(
         try:
             exported = mapper.export(canonical)
         except PlatformMappingError as exc:
-            raise _http_error(422, exc.code, str(exc)) from exc
+            trace.append(
+                TranslationTraceEvent(
+                    stage="render",
+                    status="failed",
+                    detail=f"{exc.code}: {exc}",
+                )
+            )
+            raise _translation_http_error(
+                422,
+                exc.code,
+                str(exc),
+                translation_id=translation_id,
+                failed_stage="render",
+                trace=trace,
+                deepseek_trace=deepseek_trace_summary,
+            ) from exc
         trace.append(TranslationTraceEvent(stage="render", status="success"))
         return TranslateResult(
             translation_id=translation_id,
@@ -661,6 +839,56 @@ def _http_error(status_code: int, code: str, message: str) -> HTTPException:
         status_code=status_code,
         detail={"code": code, "message": message},
     )
+
+
+def _translation_http_error(
+    status_code: int,
+    code: str,
+    message: str,
+    *,
+    translation_id: str,
+    failed_stage: str,
+    trace: list[TranslationTraceEvent],
+    deepseek_trace: DeepSeekTraceSummary | None = None,
+    source_block_id: str | None = None,
+    path: str | None = None,
+    mapping_index: int | None = None,
+) -> HTTPException:
+    """Return a safe, UI-readable failure envelope for one pipeline run."""
+
+    location = {
+        key: value
+        for key, value in {
+            "source_block_id": source_block_id,
+            "path": path,
+            "mapping_index": mapping_index,
+        }.items()
+        if value is not None
+    }
+    diagnostics = {
+        "translation_id": translation_id,
+        "failed_stage": failed_stage,
+        "completed_stages": [
+            event.stage for event in trace if event.status == "success"
+        ],
+        "trace": [event.model_dump(mode="json") for event in trace],
+        "deepseek_trace": (
+            deepseek_trace.model_dump(mode="json")
+            if deepseek_trace is not None
+            else None
+        ),
+        "location": location,
+    }
+    return HTTPException(
+        status_code=status_code,
+        detail={"code": code, "message": message, "diagnostics": diagnostics},
+    )
+
+
+def _validation_failure_detail(validation: ValidationResult) -> str:
+    codes = ", ".join(issue.code for issue in validation.errors[:5])
+    suffix = f": {codes}" if codes else ""
+    return f"{len(validation.errors)} blocking validation error(s){suffix}"
 
 
 app = create_app()

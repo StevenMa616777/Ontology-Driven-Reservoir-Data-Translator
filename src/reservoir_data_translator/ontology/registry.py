@@ -12,6 +12,7 @@ from typing import Mapping
 from .convention import OntologyConvention
 from .loader import OntologyLoader, OntologyMetadata
 from .models import OntologyConcept
+from .scopes import ScopeRegistry
 from .validator import OntologyValidationResult
 
 
@@ -33,17 +34,25 @@ class OntologyRegistry:
         concepts: tuple[OntologyConcept, ...],
         convention: OntologyConvention,
         validation: OntologyValidationResult,
+        scopes: ScopeRegistry,
     ) -> None:
         self.metadata = metadata
         self.convention = convention
         self.validation = validation
+        self.scopes = scopes
         self._concepts: Mapping[str, OntologyConcept] = MappingProxyType(
             {concept.concept_id: concept for concept in concepts}
         )
         alias_entries: list[tuple[str, str, str]] = []
         exact_aliases: defaultdict[str, set[str]] = defaultdict(set)
         for concept in concepts:
-            for alias in concept.aliases:
+            contextual_aliases = (
+                alias
+                for binding in scopes.bindings
+                if binding.concept_id == concept.concept_id
+                for alias in binding.aliases
+            )
+            for alias in (*concept.aliases, *contextual_aliases):
                 normalized = _normalize_text(alias)
                 compact = _compact(normalized)
                 alias_entries.append((normalized, compact, concept.concept_id))
@@ -62,6 +71,7 @@ class OntologyRegistry:
             bundle.concepts,
             bundle.convention,
             bundle.validation,
+            bundle.scopes,
         )
 
     def get_concept(self, concept_id: str) -> OntologyConcept:

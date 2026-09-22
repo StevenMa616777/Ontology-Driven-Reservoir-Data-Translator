@@ -1,0 +1,9 @@
+mapping_version: "0.2.0"
+source_system: vendor_schedule_days
+activation_terms: [endDay, outputEveryDays]
+instructions: "endDay is elapsed simulation duration in days; outputEveryDays is report interval in days. Do not replace fixed day counts with calendar periods."
+entries:
+  - source_term: endDay
+    concept_id: schedule.duration
+  - source_term: outputEveryDays
+    concept_id: schedule.report_interval

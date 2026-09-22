@@ -1,0 +1,17 @@
+mapping_version: "0.2.0"
+source_system: corelab_text_table
+activation_terms: [WAT_SAT, KR_W, KR_O, PC_PSI]
+instructions: "Comma-separated oil-water core table. WAT_SAT, KR_W and KR_O are fractions; PC_PSI is pressure in psi. Preserve specimen metadata."
+entries:
+  - source_term: WAT_SAT
+    concept_id: physical.water_saturation
+    context: {scope: relative_permeability, role: coordinate, phase: water, phase_system: oil_water}
+  - source_term: KR_W
+    concept_id: physical.relative_permeability
+    context: {scope: relative_permeability, role: property, phase: water, phase_system: oil_water}
+  - source_term: KR_O
+    concept_id: physical.relative_permeability
+    context: {scope: relative_permeability, role: property, phase: oil, phase_system: oil_water}
+  - source_term: PC_PSI
+    concept_id: physical.capillary_pressure
+    context: {scope: relative_permeability, role: property, phase_system: oil_water}

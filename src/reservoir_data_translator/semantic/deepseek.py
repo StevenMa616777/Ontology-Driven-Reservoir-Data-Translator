@@ -37,6 +37,8 @@ class DeepSeekCallTrace(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
     call_id: str
+    attempt_group_id: str
+    retry_of_call_id: str | None = None
     source_block_id: str | None
     call_reason: str
     logical_attempt: int
@@ -53,11 +55,13 @@ class DeepSeekCallTrace(BaseModel):
     total_tokens: int | None
     request_payload: dict[str, Any]
     response_payload: Any = None
+    validated_output: Any = None
     outcome: str
     local_correction: str | None = None
     avoided_network_retry: bool = False
     error_code: str | None = None
     error_message: str | None = None
+    error_details: list[dict[str, Any]] | None = None
 
 
 _TRACE_COLLECTOR: ContextVar[list[DeepSeekCallTrace] | None] = ContextVar(
@@ -238,6 +242,7 @@ class DeepSeekProvider(SemanticModelProvider):
                         ),
                         local_correction=local_correction,
                         avoided_network_retry=local_correction is not None,
+                        validated_output=result.model_dump(mode="json"),
                     )
                     return result
                 except SemanticProviderError as exc:
@@ -245,6 +250,7 @@ class DeepSeekProvider(SemanticModelProvider):
                         outcome="output_invalid",
                         error_code=exc.code,
                         error_message=str(exc),
+                        error_details=exc.details,
                     )
                     retryable = exc.code in {
                         "DEEPSEEK_INVALID_JSON",
@@ -278,9 +284,26 @@ class DeepSeekProvider(SemanticModelProvider):
         try:
             result = response_model.model_validate(structured)
         except ValidationError as exc:
+            details = [
+                {
+                    "type": error.get("type"),
+                    "location": list(error.get("loc", ())),
+                    "message": error.get("msg"),
+                    "input": error.get("input"),
+                }
+                for error in exc.errors(include_url=False, include_input=True)
+            ]
             raise SemanticProviderError(
                 "DEEPSEEK_SCHEMA_MISMATCH",
-                "DeepSeek JSON did not satisfy the requested response model.",
+                (
+                    "DeepSeek JSON did not satisfy the requested response model: "
+                    + "; ".join(
+                        f"{'.'.join(map(str, detail['location'])) or '<root>'}: "
+                        f"{detail['message']}"
+                        for detail in details[:3]
+                    )
+                ),
+                details=details,
             ) from exc
 
         return result, local_correction
@@ -384,13 +407,31 @@ class DeepSeekProvider(SemanticModelProvider):
         response_payload: Any = None,
         error_code: str | None = None,
         error_message: str | None = None,
+        error_details: list[dict[str, Any]] | None = None,
     ) -> None:
         payload = response_payload if isinstance(response_payload, Mapping) else {}
         usage = payload.get("usage")
         if not isinstance(usage, Mapping):
             usage = {}
+        collector = _TRACE_COLLECTOR.get()
+        call_id = str(uuid4())
+        previous_call = next(
+            (
+                call
+                for call in reversed(collector or [])
+                if call.source_block_id == source_block_id
+            ),
+            None,
+        )
+        is_retry = call_reason in {"output_retry", "contract_retry", "transport_retry"}
         trace = DeepSeekCallTrace(
-            call_id=str(uuid4()),
+            call_id=call_id,
+            attempt_group_id=(
+                previous_call.attempt_group_id
+                if is_retry and previous_call is not None
+                else call_id
+            ),
+            retry_of_call_id=(previous_call.call_id if is_retry and previous_call is not None else None),
             source_block_id=source_block_id,
             call_reason=call_reason,
             logical_attempt=logical_attempt,
@@ -414,8 +455,8 @@ class DeepSeekProvider(SemanticModelProvider):
             ),
             error_code=error_code,
             error_message=error_message,
+            error_details=error_details,
         )
-        collector = _TRACE_COLLECTOR.get()
         if collector is not None:
             collector.append(trace)
         if self._trace_sink is not None:
@@ -429,6 +470,8 @@ class DeepSeekProvider(SemanticModelProvider):
         avoided_network_retry: bool = False,
         error_code: str | None = None,
         error_message: str | None = None,
+        error_details: list[dict[str, Any]] | None = None,
+        validated_output: Any = None,
     ) -> None:
         collector = _TRACE_COLLECTOR.get()
         if not collector:
@@ -439,6 +482,8 @@ class DeepSeekProvider(SemanticModelProvider):
         trace.avoided_network_retry = avoided_network_retry
         trace.error_code = error_code
         trace.error_message = error_message
+        trace.error_details = error_details
+        trace.validated_output = validated_output
 
     def record_contract_failure(self, code: str, message: str) -> None:
         self._mark_latest_trace(

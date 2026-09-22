@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 
 from reservoir_data_translator.canonical import ReservoirSimulationModel
+from reservoir_data_translator.ontology import SemanticContext
 from reservoir_data_translator.validation import (
     ValidationIssue,
     ValidationResult,
@@ -92,6 +93,18 @@ class EclipseDemoMapper(PlatformMapper):
                     )
                 )
             for point_index, point in enumerate(phase.pvt.points):
+                for unsupported_field in ("compressibility", "viscosibility"):
+                    if getattr(point, unsupported_field) is not None:
+                        errors.append(
+                            self._issue(
+                                "ECLIPSE_PVT_PROPERTY_UNSUPPORTED",
+                                f"fluids.{phase_name}.pvt.points[{point_index}].{unsupported_field}",
+                                (
+                                    f"The demo {phase_name} PVT keyword cannot represent "
+                                    f"{unsupported_field}; export would lose supplied data."
+                                ),
+                            )
+                        )
                 if point.formation_volume_factor is None or point.viscosity is None:
                     errors.append(
                         self._issue(
@@ -228,7 +241,10 @@ class EclipseDemoMapper(PlatformMapper):
         if all(phase is not None and phase.density is not None for phase in phases):
             blocks.append(
                 PlatformBlock(
-                    keyword=self._mappings.target_for("fluid.oil.density"),
+                    keyword=self._mappings.target_for(
+                        "physical.density",
+                        SemanticContext(scope="fluid_properties", phase="oil", role="property"),
+                    ),
                     section="PROPS",
                     records=[
                         _record(
@@ -245,7 +261,6 @@ class EclipseDemoMapper(PlatformMapper):
             phase = getattr(canonical_model.fluids, phase_name)
             if phase is None or phase.pvt is None:
                 continue
-            concept = f"fluid.{phase_name}.pvt"
             records = [
                 _record(
                     [
@@ -260,7 +275,10 @@ class EclipseDemoMapper(PlatformMapper):
             if records:
                 blocks.append(
                     PlatformBlock(
-                        keyword=self._mappings.target_for(concept),
+                        keyword=self._mappings.target_for(
+                            "fluid.pvt",
+                            SemanticContext(scope="pvt", phase=phase_name, role="model"),
+                        ),
                         section="PROPS",
                         records=records,
                     )
@@ -270,7 +288,10 @@ class EclipseDemoMapper(PlatformMapper):
         if water is not None and water.pvt is not None:
             blocks.append(
                 PlatformBlock(
-                    keyword=self._mappings.target_for("fluid.water.pvt"),
+                    keyword=self._mappings.target_for(
+                        "fluid.pvt",
+                        SemanticContext(scope="pvt", phase="water", role="model"),
+                    ),
                     section="PROPS",
                     records=[
                         _record(

@@ -1,12 +1,18 @@
 # Ontology-Driven Reservoir Data Translator
 
-面向油藏数值模拟资料的语义转换 PoC：把异构的 TXT、JSON、CSV、XLSX
+面向油藏数值模拟资料的语义转换 PoC：把异构的 TXT、JSON、CSV、XLSX、
+原生文本 PDF
 资料转换为统一的 Canonical Data Model，再由确定性程序生成 Eclipse/OPM
 INCLUDE 或 CMG Demo 片段。
 
 > **PoC v0.1 已于 2026-09-02 完成阶段性收口。** 当前结论是“技术路线和
 > Demo 闭环成立”，不是“已经达到生产环境或商业模拟器认证标准”。详细证据和
 > 边界见 [PoC 收口报告](docs/POC_CLOSURE.md)。
+
+**2026-09-22 代码状态：** Ontology 0.2.0 已将可复用概念、Scope/context 和
+Canonical 存储规则分离，检索、语义判别、构建与导出校验已同步调整。本地收口验证
+为 317 项测试通过、Ontology 0 error / 0 warning；测试代码、测试数据和阶段文档未随
+本次代码更新发布。
 
 ## 我们想解决什么
 
@@ -17,6 +23,7 @@ INCLUDE 或 CMG Demo 片段。
 
 - LLM 只负责非确定性的“这段资料表达了什么”；
 - Company Ontology 定义统一的业务语义；
+- Scope 声明概念的任务上下文，Semantic IR 保留概念、相态、用途和分组选择器；
 - Canonical Model 是平台无关的唯一内部表达；
 - 单位换算、模型构建、校验和目标文件生成全部由确定性代码负责；
 - 缺失、歧义或低置信度信息必须停在人工审查门，不允许模型猜测补全。
@@ -25,10 +32,11 @@ INCLUDE 或 CMG Demo 片段。
 
 ```mermaid
 flowchart LR
-    A[TXT / JSON / CSV / XLSX] --> B[Ingestion<br/>RawDocument]
-    B --> C[Ontology Retrieval]
+    A[TXT / JSON / CSV / XLSX / native PDF] --> B[Ingestion<br/>RawDocument]
+    B --> C[Scope Detection<br/>Contextual Retrieval]
     C --> D[LLM Semantic Mapping]
-    D --> E{Review Gate}
+    D --> R[Semantic IR<br/>Deterministic Path Resolution]
+    R --> E{Review Gate}
     E -->|未映射 / 歧义 / 低置信度| F[Human Review]
     E -->|通过| G[Canonical Builder]
     F -->|批准可接受的低置信度项| G
@@ -41,11 +49,14 @@ flowchart LR
 一次 `/translate` 请求按以下顺序运行：
 
 1. Parser 只解析文件结构，生成带来源位置的 `RawDocument/RawBlock`。
-2. Retriever 从 Ontology 和外部 Source Mapping 中提供受控候选。
+2. Retriever 识别 Scope，从 Ontology、Scope binding 和外部 Source Mapping
+   中提供带上下文的受控候选。
 3. DeepSeek 返回结构化 `MAPPED/UNMAPPED/AMBIGUOUS` 结果；系统重新校验
-   Concept、Canonical Path、单位、结构值和实体关系。
+   Concept、Context、Selectors、单位、结构值和实体关系，并确定性解析 Canonical
+   Path。同一概念的不同相态或用途仍可形成歧义。
 4. Review Gate 阻断未解决项和置信度低于 0.80 的结果。
-5. `CanonicalBuilder` 做单位归一和平台无关模型构建，不创造缺失值。
+5. `CanonicalBuilder` 再次校验上下文和路径，完成单位归一及平台无关模型构建，
+   不创造缺失值。
 6. L1-L3 分别验证 Schema、Ontology 实例约束和领域规则。
 7. Eclipse/CMG Mapper 生成确定性目标中间模型与文本，L4 验证目标可导出性。
 8. 响应返回 translation ID、各阶段 trace、Canonical、Validation 和目标片段。
@@ -57,8 +68,8 @@ flowchart LR
 
 | 能力 | 当前状态 |
 |---|---|
-| 输入 | TXT、JSON、CSV、XLSX；保留 block 级来源位置 |
-| 语义层 | 外部 YAML Ontology、Source Mapping、受控检索、DeepSeek V4 Flash |
+| 输入 | TXT、JSON、CSV、XLSX、原生文本 PDF；PDF 保留 page、bbox、阅读顺序和分块 span；OCR 不在当前范围 |
+| 语义层 | 39 个可复用概念、7 个 Scope、41 个 binding；Source Mapping、上下文检索、DeepSeek V4 Flash |
 | Canonical | Rock、Fluid/PVT、SCAL、Well/Control、Schedule |
 | 单位 | 压力、速率、黏度、密度、时间、压缩系数的受控换算 |
 | 安全门 | UNMAPPED、AMBIGUOUS、低置信度阻断；浏览器会话内人工批准 |
@@ -125,14 +136,14 @@ Eclipse INCLUDE → OPM 2025.10 Parser → Golden 语义比较，并把不含密
 .
 ├── src/reservoir_data_translator/
 │   ├── ingestion/      # 文件结构解析
-│   ├── ontology/       # Ontology 加载、Registry、定义校验
-│   ├── semantic/       # 检索、Source Mapping、Provider、语义安全门
-│   ├── canonical/      # 平台无关模型与确定性 Builder
+│   ├── ontology/       # 概念与 Scope 加载、Registry、定义校验
+│   ├── semantic/       # 上下文检索、语义 IR、Provider、语义安全门
+│   ├── canonical/      # 独立路径解析规则、平台无关模型与 Builder
 │   ├── validation/     # L1-L4 与 OPM Parser 对比
 │   ├── mappers/        # Eclipse / CMG 确定性 Mapper
 │   ├── api/            # FastAPI 分阶段接口与完整流水线
 │   └── ui/             # 本地浏览器工作台
-├── ontology/           # 平台/客户无关的 v0.1 Ontology
+├── ontology/           # 0.2.0 概念定义与 scopes.yaml
 ├── mappings/           # 客户 Source Mapping 与平台 Output Mapping
 ├── example/            # Demo 原文与 Eclipse 输出 Golden
 ├── scripts/            # 真实 Provider smoke / 完整验收脚本
@@ -152,6 +163,9 @@ Eclipse INCLUDE → OPM 2025.10 Parser → Golden 语义比较，并把不含密
 
 ## 明确边界
 
+- Scope 中存在合法语义组合，不代表已经支持其 Canonical 构建或目标导出。PVT
+  压缩系数和黏压系数的语义转换仍限水相；无存储规则的参考条件等内容保留未映射
+  审查，直接 Canonical 输入的目标不支持字段也不能静默丢弃。
 - Eclipse 输出通过固定版本 OPM Python Parser 和输出 Golden 比较，但尚未在真实
   host deck 中运行 Flow，也未经过商业 ECLIPSE 认证。
 - 当前没有带人工 Concept/Path 标签的代表性 Semantic Gold 数据集，因此不宣称

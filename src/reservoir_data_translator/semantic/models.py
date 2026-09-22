@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, FiniteFloat, StrictInt, StrictStr, model_validator
+
+from reservoir_data_translator.ontology.context import SemanticContext
 
 from reservoir_data_translator.canonical.models import (
     CanonicalModel,
@@ -21,6 +23,8 @@ class SemanticMapping(CanonicalModel):
     source_text: str | None = None
     source_block_id: NonEmptyString
     ontology_concept: NonEmptyString
+    context: SemanticContext | None = None
+    selectors: dict[str, StrictStr | StrictInt] = Field(default_factory=dict)
     canonical_path: NonEmptyString
     value: Any
     source_unit: NonEmptyString | None = None
@@ -39,6 +43,23 @@ class SemanticMapping(CanonicalModel):
         return self
 
 
+class SemanticChoice(CanonicalModel):
+    """A concept in one allowed context, including same-concept ambiguity."""
+
+    concept_id: NonEmptyString
+    context: SemanticContext
+
+
+def _validate_ambiguity(concepts: list[str], choices: list[SemanticChoice]) -> None:
+    if len(concepts) != len(set(concepts)):
+        raise ValueError("candidate_concepts must not contain duplicates")
+    keys = {(choice.concept_id, choice.context) for choice in choices}
+    if len(keys) != len(choices):
+        raise ValueError("candidate_contexts must not contain duplicates")
+    if len(concepts) < 2 and len(keys) < 2:
+        raise ValueError("AMBIGUOUS requires at least two distinct concepts or contextual choices")
+
+
 class UnmappedSemanticMapping(CanonicalModel):
     """Source content for which no supplied ontology concept is valid."""
 
@@ -48,6 +69,7 @@ class UnmappedSemanticMapping(CanonicalModel):
     source_block_id: NonEmptyString
     candidate_concepts: list[NonEmptyString] = Field(default_factory=list)
     confidence: Confidence = 0.0
+    reason: str | None = None
     provenance: Provenance
 
     @model_validator(mode="after")
@@ -67,7 +89,8 @@ class AmbiguousSemanticMapping(CanonicalModel):
     source_text: str | None = None
     source_field: NonEmptyString | None = None
     source_block_id: NonEmptyString
-    candidate_concepts: list[NonEmptyString] = Field(min_length=2)
+    candidate_concepts: list[NonEmptyString] = Field(default_factory=list)
+    candidate_contexts: list[SemanticChoice] = Field(default_factory=list)
     value: Any = None
     source_unit: NonEmptyString | None = None
     confidence: Confidence
@@ -75,8 +98,7 @@ class AmbiguousSemanticMapping(CanonicalModel):
 
     @model_validator(mode="after")
     def validate_ambiguous(self) -> "AmbiguousSemanticMapping":
-        if len(self.candidate_concepts) != len(set(self.candidate_concepts)):
-            raise ValueError("candidate_concepts must not contain duplicates")
+        _validate_ambiguity(self.candidate_concepts, self.candidate_contexts)
         _validate_provenance_block(self.source_block_id, self.provenance)
         return self
 
@@ -87,11 +109,23 @@ SemanticMappingOutcome = Annotated[
 ]
 
 
+class SourceAnnotation(CanonicalModel):
+    """Parser-owned context or deterministically consumed metadata, never a fact guess."""
+
+    source_block_id: NonEmptyString
+    source_location: str | None = None
+    kind: Literal["heading", "metadata", "absence_statement", "structural_context", "consumed_metadata"]
+    content: Any
+    reason: NonEmptyString
+    related_block_ids: list[str] = Field(default_factory=list)
+
+
 class SemanticMappingBatch(CanonicalModel):
     """All structured semantic outcomes produced for one raw document."""
 
     source_id: NonEmptyString
     mappings: list[SemanticMappingOutcome]
+    source_annotations: list[SourceAnnotation] = Field(default_factory=list)
 
     @property
     def mapped(self) -> list[SemanticMapping]:
@@ -132,6 +166,29 @@ class SemanticMappingBatch(CanonicalModel):
         return [mapping for mapping in self.mapped if mapping.confidence >= 0.95]
 
 
+class PVTStructuralValueDraft(CanonicalModel):
+    """Allowed provider value for a PVT structural-parent mapping."""
+
+    model_type: Literal["table", "constant"]
+
+
+class RelativePermeabilityStructuralValueDraft(CanonicalModel):
+    """Allowed provider value for a relative-permeability parent mapping."""
+
+    id: NonEmptyString | None = None
+    sample_id: NonEmptyString | None = None
+    phase_system: list[NonEmptyString] = Field(min_length=1)
+    displacement_type: NonEmptyString | None = None
+
+
+MappedValueDraft = (
+    FiniteFloat
+    | NonEmptyString
+    | PVTStructuralValueDraft
+    | RelativePermeabilityStructuralValueDraft
+)
+
+
 class MappedMappingDraft(CanonicalModel):
     """Provider-owned structured fields before trusted provenance is attached."""
 
@@ -139,8 +196,10 @@ class MappedMappingDraft(CanonicalModel):
     source_text: str | None = None
     source_block_id: NonEmptyString
     ontology_concept: NonEmptyString
-    canonical_path: NonEmptyString
-    value: Any
+    context: SemanticContext | None = None
+    selectors: dict[str, StrictStr | StrictInt] = Field(default_factory=dict)
+    canonical_path: NonEmptyString | None = None
+    value: MappedValueDraft
     source_unit: NonEmptyString | None = None
     canonical_unit: NonEmptyString | None = None
     confidence: Confidence
@@ -168,15 +227,15 @@ class AmbiguousMappingDraft(CanonicalModel):
     source_text: str | None = None
     source_field: NonEmptyString | None = None
     source_block_id: NonEmptyString
-    candidate_concepts: list[NonEmptyString] = Field(min_length=2)
+    candidate_concepts: list[NonEmptyString] = Field(default_factory=list)
+    candidate_contexts: list[SemanticChoice] = Field(default_factory=list)
     value: Any = None
     source_unit: NonEmptyString | None = None
     confidence: Confidence
 
     @model_validator(mode="after")
     def candidates_are_unique(self) -> "AmbiguousMappingDraft":
-        if len(self.candidate_concepts) != len(set(self.candidate_concepts)):
-            raise ValueError("candidate_concepts must not contain duplicates")
+        _validate_ambiguity(self.candidate_concepts, self.candidate_contexts)
         return self
 
 

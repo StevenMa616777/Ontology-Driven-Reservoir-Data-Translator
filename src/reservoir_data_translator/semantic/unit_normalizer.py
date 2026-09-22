@@ -62,7 +62,7 @@ class InvalidMagnitudeError(UnitNormalizationError):
 def _unit_key(unit: str) -> str:
     normalized = unicodedata.normalize("NFKC", unit).strip().casefold()
     normalized = normalized.replace("·", ".").replace("⋅", ".")
-    normalized = normalized.replace("per", "/")
+    normalized = re.sub(r"\bper\b", "/", normalized)
     return re.sub(r"\s+", "", normalized)
 
 
@@ -76,6 +76,7 @@ class UnitNormalizer:
             "psi": "psi",
             "kpa": "kilopascal",
             "mpa": "megapascal",
+            "pa": "pascal",
             # Surface volume rate. Semantic liquid/water meaning is retained by
             # the ontology concept; this layer only converts physical units.
             "m3/day": "meter ** 3 / day",
@@ -85,6 +86,11 @@ class UnitNormalizer:
             "bbl/d": "oil_barrel / day",
             # Dynamic viscosity
             "cp": "centipoise",
+            # 1 mPa.s is exactly 1 cP.  Lab CSV headers commonly spell this
+            # as ``viscosity_mPa_s``; NFKC/casefold turns ``mPa.s`` into this
+            # normalized key without conflating it with the pressure unit MPa.
+            "mpa.s": "millipascal * second",
+            "mpa_s": "millipascal * second",
             "pa.s": "pascal * second",
             "pa*s": "pascal * second",
             # Density
@@ -104,11 +110,14 @@ class UnitNormalizer:
             "years": "simulator_year",
             # Compressibility
             "1/bar": "1 / bar",
+            "/bar": "1 / bar",
             "bar^-1": "1 / bar",
             "1/psi": "1 / psi",
             "psi^-1": "1 / psi",
             # Canonical dimensionless quantities used by Task 4.
             "fraction": "dimensionless",
+            "%": "percent",
+            "percent": "percent",
             "rm3/sm3": "dimensionless",
         }
     )

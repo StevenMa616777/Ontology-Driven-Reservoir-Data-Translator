@@ -111,12 +111,13 @@ class PipelineServices:
         *,
         source_system: str | None = None,
     ) -> SemanticMappingBatch:
-        source_registries: list[SourceMappingRegistry] = []
+        source_registries = [m for m in self._source_mappings.values() if m.automatic]
         if source_system is not None:
             source_mapping = self._source_mappings.get(source_system.casefold())
             if source_mapping is None:
                 raise UnknownSourceSystemError(source_system)
-            source_registries.append(source_mapping)
+            if source_mapping not in source_registries:
+                source_registries.append(source_mapping)
         retriever = OntologyRetriever(
             self.registry,
             source_mappings=source_registries,

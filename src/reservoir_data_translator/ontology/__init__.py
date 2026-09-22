@@ -1,9 +1,11 @@
 """Company Ontology loading and lookup APIs."""
 
 from .convention import OntologyConvention, RelationshipRule
+from .context import SemanticContext
 from .loader import LoadedOntology, OntologyLoadError, OntologyLoader, OntologyMetadata
 from .models import OntologyConcept
 from .registry import OntologyRegistry
+from .scopes import ScopeBinding, ScopeDefinition, ScopeRegistry
 from .validator import (
     OntologyIssue,
     OntologyValidationResult,
@@ -23,5 +25,9 @@ __all__ = [
     "OntologyValidator",
     "LoadedOntology",
     "RelationshipRule",
+    "SemanticContext",
+    "ScopeBinding",
+    "ScopeDefinition",
+    "ScopeRegistry",
     "ValidationSeverity",
 ]

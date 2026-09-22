@@ -6,8 +6,8 @@
     <meta name="theme-color" content="#f3f0e8" />
     <title>Ontology Explorer · Reservoir Translator</title>
     <meta name="description" content="Reservoir Simulation Company Ontology 可视化浏览器" />
-    <link rel="stylesheet" href="/ui/styles.css" />
-    <link rel="stylesheet" href="/ui/ontology.css" />
+    <link rel="stylesheet" href="/ui/styles.css?v=ontology-scopes-v2" />
+    <link rel="stylesheet" href="/ui/ontology.css?v=ontology-scopes-v2" />
   </head>
   <body>
     <header class="topbar">
@@ -28,7 +28,7 @@
     <main class="ontology-main">
       <section class="ontology-intro">
         <div><p class="eyebrow">SEMANTIC MODEL MAP</p><h1>Ontology Explorer</h1></div>
-        <p>查看 Concept 层级、业务关系与字段含义。图谱为只读视图，数据直接来自运行时 Ontology Registry。</p>
+        <p>查看可复用概念、任务作用域及独立的 Canonical 路径解析规则。图谱为只读视图，数据直接来自运行时 Ontology Registry。</p>
       </section>
 
       <section class="explorer-shell" id="explorer-shell" aria-busy="true">
@@ -39,7 +39,9 @@
             <div id="search-results" class="search-results" aria-live="polite"></div>
           </div>
           <div class="explorer-section">
-            <span class="field-label">Domain</span>
+            <label class="field-label" for="scope-filter">任务作用域 · Scope</label>
+            <select id="scope-filter" class="search-input"><option value="">所有作用域</option></select>
+            <span class="field-label">词汇分类</span>
             <div id="domain-filters" class="filter-list"></div>
           </div>
           <div class="explorer-section">
@@ -77,7 +79,7 @@
         </aside>
       </section>
     </main>
-    <script src="/ui/ui-preferences.js" defer></script>
-    <script src="/ui/ontology.js" defer></script>
+    <script src="/ui/ui-preferences.js?v=ontology-scopes-v2" defer></script>
+    <script src="/ui/ontology.js?v=ontology-scopes-v2" defer></script>
   </body>
 </html>

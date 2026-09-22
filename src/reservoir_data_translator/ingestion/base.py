@@ -7,7 +7,6 @@ from pathlib import Path
 
 from .models import RawDocument
 
-
 class IngestionError(ValueError):
     """A source cannot be represented safely by the selected parser."""
 
@@ -56,6 +55,14 @@ class DocumentParser(ABC):
                 path=source_path,
             )
         return source_path
+
+    # TODO: source_id 当前默认使用文件名，因此不同目录或不同批次中的
+    #  同名文件可能产生相同的 source_id，无法可靠标识一次具体的输入记录。
+    #  引入数据库或任务系统后，应由上层系统为每次上传生成稳定且唯一的 ID。
+    #  字段职责示例：
+    #   source_id = "upl_8f31c22a"       - 一次具体上传记录的唯一标识
+    #   source_system = "client-a"       - 数据来源系统或客户
+    #   file_name = "production.xlsx"    - 用户提交的原始文件名
 
     @staticmethod
     def _source_id(path: Path, source_id: str | None) -> str:

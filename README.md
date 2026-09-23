@@ -7,7 +7,12 @@ INCLUDE 或 CMG Demo 片段。
 
 > **PoC v0.1 已于 2026-09-02 完成阶段性收口。** 当前结论是“技术路线和
 > Demo 闭环成立”，不是“已经达到生产环境或商业模拟器认证标准”。详细证据和
-> 边界见 [PoC 收口报告](docs/POC_CLOSURE.md)。
+> 边界见 [2026-09-22 开发阶段收口报告](docs/audits/2026-09-22-development-closure.md)；
+> v0.1 历史基线保留在 [PoC 收口报告](docs/POC_CLOSURE.md)。
+
+2026-09-20 更新：Ontology 0.2.0 将可复用概念、Scope/context 和 Canonical 存储
+规则分离，检索、语义判别、构建与导出校验已同步调整。见
+[Ontology 上下文重构记录](docs/updates/2026-09-20-ontology-context-refactor.md)。
 
 **2026-09-22 代码状态：** Ontology 0.2.0 已将可复用概念、Scope/context 和
 Canonical 存储规则分离，检索、语义判别、构建与导出校验已同步调整。本地收口验证
@@ -153,12 +158,16 @@ Eclipse INCLUDE → OPM 2025.10 Parser → Golden 语义比较，并把不含密
 
 ## 文档导航
 
+- [当前开发阶段收口报告](docs/audits/2026-09-22-development-closure.md)：Ontology 0.2.0、异构资料真实回归、当前验收证据和剩余 P0 边界。
 - [项目总览与运行逻辑](docs/PROJECT_OVERVIEW.md)：我们想做什么、怎么做、系统现在如何运行。
 - [PoC 收口报告](docs/POC_CLOSURE.md)：冻结范围、当前证据、完成结论和遗留边界。
 - [运行手册](docs/RUNBOOK.md)：安装、启动、API、测试、真实模型验收和安全约束。
 - [开发设计文档](DESIGN.md)：v0.1/v0.2 的详细设计合同与 Tasks 1-12。
 - [设计完成度审计](DESIGN_COMPLETENESS.md)：逐 Task、逐层完成度矩阵。
 - [Ontology 约定](ONTOLOGY_CONVENTIONS.md)：概念、别名、关系、单位和版本规则。
+- [Ontology 上下文重构记录](docs/updates/2026-09-20-ontology-context-refactor.md)：概念复用、Scope/IR、确定性路径解析、兼容迁移和支持边界。
+- [异构输入配合修复](docs/updates/2026-09-21-heterogeneous-input-repair.md)：测试数据判断、selector/上下文/元数据修复、离线回归及真实模型验收边界。
+- [DeepSeek 真实回归结果](docs/audits/2026-09-21-deepseek-heterogeneous-regression.md)：01–10 实际结果、付费用量和进一步修复。
 - [原始 PoC 企划](docs/archive/ORIGINAL_POC_BRIEF_ZH.md)：最初的业务目标与成功标准，作为历史基线保留。
 
 ## 明确边界

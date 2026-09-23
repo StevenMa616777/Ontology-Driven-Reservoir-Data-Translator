@@ -305,3 +305,98 @@ def test_validation_engine_does_not_export_domain_invalid_model(
     assert not result.valid
     assert {issue.layer for issue in result.errors} == {"domain"}
     assert platform_validator.calls == 0
+
+
+def test_traversal_reuses_physical_concepts_with_explicit_context() -> None:
+    from reservoir_data_translator.validation.traversal import iter_physical_values
+
+    observations = list(iter_physical_values(_valid_model()))
+    pressure = [item for item in observations if item.concept_id == "physical.pressure"]
+    assert {item.context.scope for item in pressure} == {"rock", "pvt"}
+    assert {item.context.role for item in pressure} == {"reference", "coordinate"}
+    relperm = [item for item in observations if item.concept_id == "physical.relative_permeability"]
+    assert {item.context.phase for item in relperm} == {"oil", "water"}
+    assert all(item.context.phase_system == "oil_water" for item in relperm)
+    assert not any(item.concept_id.startswith("fluid.oil.pvt.") for item in observations)
+
+
+def test_l2_rejects_context_unsupported_by_current_scope(
+    registry: OntologyRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from reservoir_data_translator.ontology import SemanticContext
+    from reservoir_data_translator.validation.traversal import PhysicalObservation
+
+    model = _valid_model()
+    monkeypatch.setattr(
+        "reservoir_data_translator.validation.ontology_validator.iter_physical_values",
+        lambda _model: iter([PhysicalObservation(
+            "physical.pressure", "fluids.oil.pvt.points[0].pressure",
+            _value(100, "bar"), SemanticContext(scope="pvt", role="coordinate"),
+        )]),
+    )
+    result = OntologyInstanceValidator(registry).validate(model)
+
+    assert any(
+        issue.code == "ONTOLOGY_CONTEXT_ERROR"
+        and issue.path == "fluids.oil.pvt.points[0].pressure"
+        for issue in result.errors
+    )
+
+
+def test_l2_validates_table_phase_system_even_when_empty(
+    registry: OntologyRegistry,
+) -> None:
+    model = _valid_model()
+    table = model.scal.relative_permeability[0]
+    table.phase_system = ["water", "gas"]
+    table.points = []
+
+    result = OntologyInstanceValidator(registry).validate(model)
+
+    assert not result.valid
+    assert result.errors[0].path == "scal.relative_permeability[0].phase_system"
+    assert result.errors[0].code == "ONTOLOGY_CONTEXT_ERROR"
+
+
+def test_l2_accepts_order_independent_oil_water_phase_system(
+    registry: OntologyRegistry,
+) -> None:
+    model = _valid_model()
+    model.scal.relative_permeability[0].phase_system = ["water", "oil"]
+
+    assert OntologyInstanceValidator(registry).validate(model).valid
+
+
+def test_l2_reports_empty_phase_system_without_crashing(
+    registry: OntologyRegistry,
+) -> None:
+    model = _valid_model()
+    model.scal.relative_permeability[0].phase_system = []
+
+    result = ValidationEngine(registry).validate(model)
+
+    assert not result.valid
+    assert {issue.code for issue in result.errors} == {"ONTOLOGY_CONTEXT_ERROR"}
+
+
+def test_l3_preserves_specialized_ranges_after_quantity_reuse(
+    registry: OntologyRegistry,
+) -> None:
+    model = _valid_model()
+    model.rock.compressibility.value = 0
+    model.fluids.water.pvt = PVTModel(
+        model_type="constant",
+        points=[PVTPoint(
+            pressure=_value(100, "bar"),
+            compressibility=_value(0, "1/bar"),
+            viscosibility=_value(-0.01, "1/bar"),
+        )],
+    )
+    model.scal.relative_permeability[0].points[0].pcow.value = -0.35
+
+    result = DomainValidator(registry).validate(model)
+
+    assert [(issue.code, issue.path) for issue in result.errors] == [
+        ("VALUE_OUT_OF_RANGE", "rock.compressibility")
+    ]

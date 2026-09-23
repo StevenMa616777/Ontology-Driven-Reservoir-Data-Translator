@@ -18,19 +18,15 @@ def test_valid_relationship_is_accepted(registry: OntologyRegistry) -> None:
     )
 
 
-def test_reference_condition_relationship_is_machine_readable_and_inverse(
+def test_reference_condition_relationship_is_scoped_and_inverse(
     registry: OntologyRegistry,
 ) -> None:
-    assert registry.validate_relationship(
-        "fluid.oil.density",
-        "referenced_at",
-        "condition.reference",
-    )
-    assert registry.validate_relationship(
-        "condition.reference",
-        "reference_for",
-        "fluid.oil.density",
-    )
+    bindings = registry.scopes.get_scope("rock").bindings
+    compressibility = next(item for item in bindings if item.concept_id == "rock.compressibility")
+    pressure = next(item for item in bindings if item.concept_id == "physical.pressure")
+    assert compressibility.relationships == {"referenced_at": ("physical.pressure",)}
+    assert pressure.relationships == {"reference_for": ("rock.compressibility",)}
+    assert registry.get_relationships("physical.pressure") == {}
 
 
 def test_semantically_invalid_relationship_is_rejected(

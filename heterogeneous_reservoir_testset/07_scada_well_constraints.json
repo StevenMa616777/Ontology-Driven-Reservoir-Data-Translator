@@ -1,0 +1,9 @@
+{
+  "asset": "demo_field",
+  "controls": [
+    {"wellId":"A15","wellType":"PRODUCER","controlMode":"LIQUID_RATE","target":500,"unit":"m3/day","minBHP":80,"pressureUnit":"bar"},
+    {"wellId":"B2","wellType":"PRODUCER","controlMode":"LIQUID_RATE","target":500,"unit":"m3/day","minBHP":80,"pressureUnit":"bar"},
+    {"wellId":"C1","wellType":"INJECTOR","fluid":"WATER","controlMode":"INJECTION_RATE","target":800,"unit":"m3/day","maxBHP":420,"pressureUnit":"bar"}
+  ],
+  "simulation":{"duration_years":5,"report_interval":"QUARTERLY"}
+}

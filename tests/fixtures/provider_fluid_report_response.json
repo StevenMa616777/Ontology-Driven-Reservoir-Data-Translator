@@ -1,0 +1,717 @@
+{
+  "origin_trace_id": "2f1b4b91-68d9-4edd-a229-e216616762df",
+  "response": {
+    "mappings": [
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "fluid.pvt",
+        "context": {
+          "scope": "pvt",
+          "phase": "oil",
+          "role": "model",
+          "phase_system": null
+        },
+        "selectors": {},
+        "canonical_path": null,
+        "value": {
+          "model_type": "table"
+        },
+        "source_unit": null,
+        "canonical_unit": null,
+        "confidence": 0.95
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.pressure",
+        "context": {
+          "scope": "pvt",
+          "phase": "oil",
+          "role": "coordinate",
+          "phase_system": null
+        },
+        "selectors": {
+          "point_index": 0
+        },
+        "canonical_path": null,
+        "value": 100.0,
+        "source_unit": "bar",
+        "canonical_unit": "bar",
+        "confidence": 0.95
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.formation_volume_factor",
+        "context": {
+          "scope": "pvt",
+          "phase": "oil",
+          "role": "property",
+          "phase_system": null
+        },
+        "selectors": {
+          "point_index": 0
+        },
+        "canonical_path": null,
+        "value": 1.25,
+        "source_unit": "rm3/sm3",
+        "canonical_unit": "rm3/sm3",
+        "confidence": 0.95
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.viscosity",
+        "context": {
+          "scope": "pvt",
+          "phase": "oil",
+          "role": "property",
+          "phase_system": null
+        },
+        "selectors": {
+          "point_index": 0
+        },
+        "canonical_path": null,
+        "value": 1.1,
+        "source_unit": "cP",
+        "canonical_unit": "cP",
+        "confidence": 0.95
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.pressure",
+        "context": {
+          "scope": "pvt",
+          "phase": "oil",
+          "role": "coordinate",
+          "phase_system": null
+        },
+        "selectors": {
+          "point_index": 1
+        },
+        "canonical_path": null,
+        "value": 200.0,
+        "source_unit": "bar",
+        "canonical_unit": "bar",
+        "confidence": 0.95
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.formation_volume_factor",
+        "context": {
+          "scope": "pvt",
+          "phase": "oil",
+          "role": "property",
+          "phase_system": null
+        },
+        "selectors": {
+          "point_index": 1
+        },
+        "canonical_path": null,
+        "value": 1.2,
+        "source_unit": "rm3/sm3",
+        "canonical_unit": "rm3/sm3",
+        "confidence": 0.95
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.viscosity",
+        "context": {
+          "scope": "pvt",
+          "phase": "oil",
+          "role": "property",
+          "phase_system": null
+        },
+        "selectors": {
+          "point_index": 1
+        },
+        "canonical_path": null,
+        "value": 1.35,
+        "source_unit": "cP",
+        "canonical_unit": "cP",
+        "confidence": 0.95
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.pressure",
+        "context": {
+          "scope": "pvt",
+          "phase": "oil",
+          "role": "coordinate",
+          "phase_system": null
+        },
+        "selectors": {
+          "point_index": 2
+        },
+        "canonical_path": null,
+        "value": 300.0,
+        "source_unit": "bar",
+        "canonical_unit": "bar",
+        "confidence": 0.95
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.formation_volume_factor",
+        "context": {
+          "scope": "pvt",
+          "phase": "oil",
+          "role": "property",
+          "phase_system": null
+        },
+        "selectors": {
+          "point_index": 2
+        },
+        "canonical_path": null,
+        "value": 1.16,
+        "source_unit": "rm3/sm3",
+        "canonical_unit": "rm3/sm3",
+        "confidence": 0.95
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.viscosity",
+        "context": {
+          "scope": "pvt",
+          "phase": "oil",
+          "role": "property",
+          "phase_system": null
+        },
+        "selectors": {
+          "point_index": 2
+        },
+        "canonical_path": null,
+        "value": 1.6,
+        "source_unit": "cP",
+        "canonical_unit": "cP",
+        "confidence": 0.95
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.pressure",
+        "context": {
+          "scope": "pvt",
+          "phase": "oil",
+          "role": "coordinate",
+          "phase_system": null
+        },
+        "selectors": {
+          "point_index": 3
+        },
+        "canonical_path": null,
+        "value": 400.0,
+        "source_unit": "bar",
+        "canonical_unit": "bar",
+        "confidence": 0.95
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.formation_volume_factor",
+        "context": {
+          "scope": "pvt",
+          "phase": "oil",
+          "role": "property",
+          "phase_system": null
+        },
+        "selectors": {
+          "point_index": 3
+        },
+        "canonical_path": null,
+        "value": 1.13,
+        "source_unit": "rm3/sm3",
+        "canonical_unit": "rm3/sm3",
+        "confidence": 0.95
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.viscosity",
+        "context": {
+          "scope": "pvt",
+          "phase": "oil",
+          "role": "property",
+          "phase_system": null
+        },
+        "selectors": {
+          "point_index": 3
+        },
+        "canonical_path": null,
+        "value": 1.85,
+        "source_unit": "cP",
+        "canonical_unit": "cP",
+        "confidence": 0.95
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "fluid.pvt",
+        "context": {
+          "scope": "pvt",
+          "phase": "gas",
+          "role": "model",
+          "phase_system": null
+        },
+        "selectors": {},
+        "canonical_path": null,
+        "value": {
+          "model_type": "table"
+        },
+        "source_unit": null,
+        "canonical_unit": null,
+        "confidence": 0.95
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.pressure",
+        "context": {
+          "scope": "pvt",
+          "phase": "gas",
+          "role": "coordinate",
+          "phase_system": null
+        },
+        "selectors": {
+          "point_index": 0
+        },
+        "canonical_path": null,
+        "value": 100.0,
+        "source_unit": "bar",
+        "canonical_unit": "bar",
+        "confidence": 0.95
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.formation_volume_factor",
+        "context": {
+          "scope": "pvt",
+          "phase": "gas",
+          "role": "property",
+          "phase_system": null
+        },
+        "selectors": {
+          "point_index": 0
+        },
+        "canonical_path": null,
+        "value": 0.012,
+        "source_unit": "rm3/sm3",
+        "canonical_unit": "rm3/sm3",
+        "confidence": 0.95
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.viscosity",
+        "context": {
+          "scope": "pvt",
+          "phase": "gas",
+          "role": "property",
+          "phase_system": null
+        },
+        "selectors": {
+          "point_index": 0
+        },
+        "canonical_path": null,
+        "value": 0.012,
+        "source_unit": "cP",
+        "canonical_unit": "cP",
+        "confidence": 0.95
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.pressure",
+        "context": {
+          "scope": "pvt",
+          "phase": "gas",
+          "role": "coordinate",
+          "phase_system": null
+        },
+        "selectors": {
+          "point_index": 1
+        },
+        "canonical_path": null,
+        "value": 200.0,
+        "source_unit": "bar",
+        "canonical_unit": "bar",
+        "confidence": 0.95
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.formation_volume_factor",
+        "context": {
+          "scope": "pvt",
+          "phase": "gas",
+          "role": "property",
+          "phase_system": null
+        },
+        "selectors": {
+          "point_index": 1
+        },
+        "canonical_path": null,
+        "value": 0.0058,
+        "source_unit": "rm3/sm3",
+        "canonical_unit": "rm3/sm3",
+        "confidence": 0.95
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.viscosity",
+        "context": {
+          "scope": "pvt",
+          "phase": "gas",
+          "role": "property",
+          "phase_system": null
+        },
+        "selectors": {
+          "point_index": 1
+        },
+        "canonical_path": null,
+        "value": 0.014,
+        "source_unit": "cP",
+        "canonical_unit": "cP",
+        "confidence": 0.95
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.pressure",
+        "context": {
+          "scope": "pvt",
+          "phase": "gas",
+          "role": "coordinate",
+          "phase_system": null
+        },
+        "selectors": {
+          "point_index": 2
+        },
+        "canonical_path": null,
+        "value": 300.0,
+        "source_unit": "bar",
+        "canonical_unit": "bar",
+        "confidence": 0.95
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.formation_volume_factor",
+        "context": {
+          "scope": "pvt",
+          "phase": "gas",
+          "role": "property",
+          "phase_system": null
+        },
+        "selectors": {
+          "point_index": 2
+        },
+        "canonical_path": null,
+        "value": 0.0038,
+        "source_unit": "rm3/sm3",
+        "canonical_unit": "rm3/sm3",
+        "confidence": 0.95
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.viscosity",
+        "context": {
+          "scope": "pvt",
+          "phase": "gas",
+          "role": "property",
+          "phase_system": null
+        },
+        "selectors": {
+          "point_index": 2
+        },
+        "canonical_path": null,
+        "value": 0.016,
+        "source_unit": "cP",
+        "canonical_unit": "cP",
+        "confidence": 0.95
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.pressure",
+        "context": {
+          "scope": "pvt",
+          "phase": "gas",
+          "role": "coordinate",
+          "phase_system": null
+        },
+        "selectors": {
+          "point_index": 3
+        },
+        "canonical_path": null,
+        "value": 400.0,
+        "source_unit": "bar",
+        "canonical_unit": "bar",
+        "confidence": 0.95
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.formation_volume_factor",
+        "context": {
+          "scope": "pvt",
+          "phase": "gas",
+          "role": "property",
+          "phase_system": null
+        },
+        "selectors": {
+          "point_index": 3
+        },
+        "canonical_path": null,
+        "value": 0.0028,
+        "source_unit": "rm3/sm3",
+        "canonical_unit": "rm3/sm3",
+        "confidence": 0.95
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.viscosity",
+        "context": {
+          "scope": "pvt",
+          "phase": "gas",
+          "role": "property",
+          "phase_system": null
+        },
+        "selectors": {
+          "point_index": 3
+        },
+        "canonical_path": null,
+        "value": 0.018,
+        "source_unit": "cP",
+        "canonical_unit": "cP",
+        "confidence": 0.95
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "fluid.pvt",
+        "context": {
+          "scope": "pvt",
+          "phase": "water",
+          "role": "model",
+          "phase_system": null
+        },
+        "selectors": {},
+        "canonical_path": null,
+        "value": {
+          "model_type": "constant"
+        },
+        "source_unit": null,
+        "canonical_unit": null,
+        "confidence": 0.9
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.pressure",
+        "context": {
+          "scope": "pvt",
+          "phase": "water",
+          "role": "coordinate",
+          "phase_system": null
+        },
+        "selectors": {
+          "point_index": 0
+        },
+        "canonical_path": null,
+        "value": 300.0,
+        "source_unit": "bar",
+        "canonical_unit": "bar",
+        "confidence": 0.9
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.formation_volume_factor",
+        "context": {
+          "scope": "pvt",
+          "phase": "water",
+          "role": "property",
+          "phase_system": null
+        },
+        "selectors": {
+          "point_index": 0
+        },
+        "canonical_path": null,
+        "value": 1.02,
+        "source_unit": "rm3/sm3",
+        "canonical_unit": "rm3/sm3",
+        "confidence": 0.9
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.compressibility",
+        "context": {
+          "scope": "pvt",
+          "phase": "water",
+          "role": "property",
+          "phase_system": null
+        },
+        "selectors": {
+          "point_index": 0
+        },
+        "canonical_path": null,
+        "value": 4.2e-05,
+        "source_unit": "/bar",
+        "canonical_unit": "1/bar",
+        "confidence": 0.9
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.viscosity",
+        "context": {
+          "scope": "pvt",
+          "phase": "water",
+          "role": "property",
+          "phase_system": null
+        },
+        "selectors": {
+          "point_index": 0
+        },
+        "canonical_path": null,
+        "value": 0.45,
+        "source_unit": "cP",
+        "canonical_unit": "cP",
+        "confidence": 0.9
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.density",
+        "context": {
+          "scope": "fluid_properties",
+          "phase": "oil",
+          "role": "property",
+          "phase_system": null
+        },
+        "selectors": {},
+        "canonical_path": null,
+        "value": 850.0,
+        "source_unit": "kg/m3",
+        "canonical_unit": "kg/m3",
+        "confidence": 0.95
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.density",
+        "context": {
+          "scope": "fluid_properties",
+          "phase": "water",
+          "role": "property",
+          "phase_system": null
+        },
+        "selectors": {},
+        "canonical_path": null,
+        "value": 1010.0,
+        "source_unit": "kg/m3",
+        "canonical_unit": "kg/m3",
+        "confidence": 0.95
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.density",
+        "context": {
+          "scope": "fluid_properties",
+          "phase": "gas",
+          "role": "property",
+          "phase_system": null
+        },
+        "selectors": {},
+        "canonical_path": null,
+        "value": 0.95,
+        "source_unit": "kg/m3",
+        "canonical_unit": "kg/m3",
+        "confidence": 0.95
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "physical.pressure",
+        "context": {
+          "scope": "rock",
+          "phase": null,
+          "role": "reference",
+          "phase_system": null
+        },
+        "selectors": {},
+        "canonical_path": null,
+        "value": 300.0,
+        "source_unit": "bar",
+        "canonical_unit": "bar",
+        "confidence": 0.95
+      },
+      {
+        "status": "MAPPED",
+        "source_text": null,
+        "source_block_id": "block_0002",
+        "ontology_concept": "rock.compressibility",
+        "context": {
+          "scope": "rock",
+          "phase": null,
+          "role": "property",
+          "phase_system": null
+        },
+        "selectors": {},
+        "canonical_path": null,
+        "value": 4.5e-05,
+        "source_unit": "/bar",
+        "canonical_unit": "1/bar",
+        "confidence": 0.95
+      }
+    ]
+  }
+}

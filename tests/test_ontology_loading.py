@@ -9,14 +9,15 @@ from conftest import ONTOLOGY_DIR
 
 
 def test_loads_manifest_and_all_domain_files(registry: OntologyRegistry) -> None:
-    assert registry.metadata.version == "0.1.0"
+    assert registry.metadata.version == "0.2.0"
     assert registry.metadata.convention_version == "0.1.0"
     assert registry.metadata.namespace == "reservoir_simulation"
-    assert len(registry) == 51
+    assert len(registry) == 39
 
     source_files = {concept.source_file for concept in registry.list_concepts()}
     assert source_files == {
         "concepts/rock.yaml",
+        "concepts/physical.yaml",
         "concepts/fluid.yaml",
         "concepts/scal.yaml",
         "concepts/well.yaml",
@@ -28,10 +29,10 @@ def test_loads_manifest_and_all_domain_files(registry: OntologyRegistry) -> None
 def test_loaded_concept_preserves_required_semantics(
     registry: OntologyRegistry,
 ) -> None:
-    concept = registry.get_concept("scal.relative_permeability.krw")
+    concept = registry.get_concept("physical.relative_permeability")
 
-    assert concept.name == "Water Relative Permeability"
-    assert concept.parent == "scal.relative_permeability"
+    assert concept.name == "Relative Permeability"
+    assert concept.parent == "physical"
     assert concept.value_type == "float"
     assert concept.dimension == "dimensionless"
     assert concept.canonical_unit == "fraction"
@@ -83,6 +84,7 @@ ontology:
   name: Test
   namespace: test
   domain: Test
+  scope_file: scopes.yaml
   convention_file: conventions_v0.1.yaml
   concept_files: [concepts.yaml]
 """.strip(),

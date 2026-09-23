@@ -1,0 +1,926 @@
+{
+  "description": "Expected source-specific canonical facts; pressure/rate tolerance includes source rounding. Quarter=91.25 days; three months=90 days. Partial files do not inherit unrelated facts.",
+  "cases": {
+    "1": {
+      "file": "01_lab_A_relperm.csv",
+      "status": "success",
+      "quantities": {
+        "scal.relative_permeability[0].points[0].sw": {
+          "value": 0.15,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[0].krw": {
+          "value": 0,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[0].kro": {
+          "value": 0.9,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[0].pcow": {
+          "value": 0.35,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[1].sw": {
+          "value": 0.3,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[1].krw": {
+          "value": 0.048,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[1].kro": {
+          "value": 0.552,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[1].pcow": {
+          "value": 0.18,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[2].sw": {
+          "value": 0.5,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[2].krw": {
+          "value": 0.205,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[2].kro": {
+          "value": 0.251,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[2].pcow": {
+          "value": 0.07,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[3].sw": {
+          "value": 0.7,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[3].krw": {
+          "value": 0.512,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[3].kro": {
+          "value": 0.048,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[3].pcow": {
+          "value": 0.02,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[4].sw": {
+          "value": 0.9,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[4].krw": {
+          "value": 0.8,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[4].kro": {
+          "value": 0,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[4].pcow": {
+          "value": 0,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        }
+      },
+      "categorical": {
+        "scal.relative_permeability[0].sample_id": "X-12"
+      }
+    },
+    "2": {
+      "file": "02_lab_B_相渗实验.txt",
+      "status": "success",
+      "quantities": {
+        "scal.relative_permeability[0].points[0].sw": {
+          "value": 0.15,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[0].krw": {
+          "value": 0,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[0].kro": {
+          "value": 0.9,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[0].pcow": {
+          "value": 0.35,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[1].sw": {
+          "value": 0.3,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[1].krw": {
+          "value": 0.048,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[1].kro": {
+          "value": 0.552,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[1].pcow": {
+          "value": 0.18,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[2].sw": {
+          "value": 0.5,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[2].krw": {
+          "value": 0.205,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[2].kro": {
+          "value": 0.251,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[2].pcow": {
+          "value": 0.07,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[3].sw": {
+          "value": 0.7,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[3].krw": {
+          "value": 0.512,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[3].kro": {
+          "value": 0.048,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[3].pcow": {
+          "value": 0.02,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[4].sw": {
+          "value": 0.9,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[4].krw": {
+          "value": 0.8,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[4].kro": {
+          "value": 0,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[4].pcow": {
+          "value": 0,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        }
+      },
+      "categorical": {
+        "scal.relative_permeability[0].sample_id": "X-12"
+      }
+    },
+    "3": {
+      "file": "03_overseas_corelab.dat",
+      "status": "success",
+      "quantities": {
+        "scal.relative_permeability[0].points[0].sw": {
+          "value": 0.15,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[0].krw": {
+          "value": 0,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[0].kro": {
+          "value": 0.9,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[0].pcow": {
+          "value": 0.35,
+          "unit": "bar",
+          "absolute_tolerance": 3e-05
+        },
+        "scal.relative_permeability[0].points[1].sw": {
+          "value": 0.3,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[1].krw": {
+          "value": 0.048,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[1].kro": {
+          "value": 0.552,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[1].pcow": {
+          "value": 0.18,
+          "unit": "bar",
+          "absolute_tolerance": 3e-05
+        },
+        "scal.relative_permeability[0].points[2].sw": {
+          "value": 0.5,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[2].krw": {
+          "value": 0.205,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[2].kro": {
+          "value": 0.251,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[2].pcow": {
+          "value": 0.07,
+          "unit": "bar",
+          "absolute_tolerance": 3e-05
+        },
+        "scal.relative_permeability[0].points[3].sw": {
+          "value": 0.7,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[3].krw": {
+          "value": 0.512,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[3].kro": {
+          "value": 0.048,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[3].pcow": {
+          "value": 0.02,
+          "unit": "bar",
+          "absolute_tolerance": 3e-05
+        },
+        "scal.relative_permeability[0].points[4].sw": {
+          "value": 0.9,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[4].krw": {
+          "value": 0.8,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[4].kro": {
+          "value": 0,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[4].pcow": {
+          "value": 0,
+          "unit": "bar",
+          "absolute_tolerance": 3e-05
+        }
+      },
+      "categorical": {
+        "scal.relative_permeability[0].sample_id": "X-12"
+      }
+    },
+    "4": {
+      "file": "04_legacy_simulator_keyword.txt",
+      "status": "review_required",
+      "quantities": {},
+      "categorical": {}
+    },
+    "5": {
+      "file": "05_pvt_lab_metric.csv",
+      "status": "success",
+      "quantities": {
+        "fluids.oil.pvt.points[0].pressure": {
+          "value": 100,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.oil.pvt.points[0].formation_volume_factor": {
+          "value": 1.25,
+          "unit": "rm3/sm3",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.oil.pvt.points[0].viscosity": {
+          "value": 1.1,
+          "unit": "cP",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.oil.pvt.points[1].pressure": {
+          "value": 200,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.oil.pvt.points[1].formation_volume_factor": {
+          "value": 1.2,
+          "unit": "rm3/sm3",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.oil.pvt.points[1].viscosity": {
+          "value": 1.35,
+          "unit": "cP",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.oil.pvt.points[2].pressure": {
+          "value": 300,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.oil.pvt.points[2].formation_volume_factor": {
+          "value": 1.16,
+          "unit": "rm3/sm3",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.oil.pvt.points[2].viscosity": {
+          "value": 1.6,
+          "unit": "cP",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.oil.pvt.points[3].pressure": {
+          "value": 400,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.oil.pvt.points[3].formation_volume_factor": {
+          "value": 1.13,
+          "unit": "rm3/sm3",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.oil.pvt.points[3].viscosity": {
+          "value": 1.85,
+          "unit": "cP",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.gas.pvt.points[0].pressure": {
+          "value": 100,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.gas.pvt.points[0].formation_volume_factor": {
+          "value": 0.012,
+          "unit": "rm3/sm3",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.gas.pvt.points[0].viscosity": {
+          "value": 0.012,
+          "unit": "cP",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.gas.pvt.points[1].pressure": {
+          "value": 200,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.gas.pvt.points[1].formation_volume_factor": {
+          "value": 0.0058,
+          "unit": "rm3/sm3",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.gas.pvt.points[1].viscosity": {
+          "value": 0.014,
+          "unit": "cP",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.gas.pvt.points[2].pressure": {
+          "value": 300,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.gas.pvt.points[2].formation_volume_factor": {
+          "value": 0.0038,
+          "unit": "rm3/sm3",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.gas.pvt.points[2].viscosity": {
+          "value": 0.016,
+          "unit": "cP",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.gas.pvt.points[3].pressure": {
+          "value": 400,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.gas.pvt.points[3].formation_volume_factor": {
+          "value": 0.0028,
+          "unit": "rm3/sm3",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.gas.pvt.points[3].viscosity": {
+          "value": 0.018,
+          "unit": "cP",
+          "absolute_tolerance": 1e-08
+        }
+      },
+      "categorical": {}
+    },
+    "6": {
+      "file": "06_fluid_properties_report.txt",
+      "status": "success",
+      "quantities": {
+        "fluids.oil.pvt.points[0].pressure": {
+          "value": 100,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.oil.pvt.points[0].formation_volume_factor": {
+          "value": 1.25,
+          "unit": "rm3/sm3",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.oil.pvt.points[0].viscosity": {
+          "value": 1.1,
+          "unit": "cP",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.oil.pvt.points[1].pressure": {
+          "value": 200,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.oil.pvt.points[1].formation_volume_factor": {
+          "value": 1.2,
+          "unit": "rm3/sm3",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.oil.pvt.points[1].viscosity": {
+          "value": 1.35,
+          "unit": "cP",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.oil.pvt.points[2].pressure": {
+          "value": 300,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.oil.pvt.points[2].formation_volume_factor": {
+          "value": 1.16,
+          "unit": "rm3/sm3",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.oil.pvt.points[2].viscosity": {
+          "value": 1.6,
+          "unit": "cP",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.oil.pvt.points[3].pressure": {
+          "value": 400,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.oil.pvt.points[3].formation_volume_factor": {
+          "value": 1.13,
+          "unit": "rm3/sm3",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.oil.pvt.points[3].viscosity": {
+          "value": 1.85,
+          "unit": "cP",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.gas.pvt.points[0].pressure": {
+          "value": 100,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.gas.pvt.points[0].formation_volume_factor": {
+          "value": 0.012,
+          "unit": "rm3/sm3",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.gas.pvt.points[0].viscosity": {
+          "value": 0.012,
+          "unit": "cP",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.gas.pvt.points[1].pressure": {
+          "value": 200,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.gas.pvt.points[1].formation_volume_factor": {
+          "value": 0.0058,
+          "unit": "rm3/sm3",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.gas.pvt.points[1].viscosity": {
+          "value": 0.014,
+          "unit": "cP",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.gas.pvt.points[2].pressure": {
+          "value": 300,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.gas.pvt.points[2].formation_volume_factor": {
+          "value": 0.0038,
+          "unit": "rm3/sm3",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.gas.pvt.points[2].viscosity": {
+          "value": 0.016,
+          "unit": "cP",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.gas.pvt.points[3].pressure": {
+          "value": 400,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.gas.pvt.points[3].formation_volume_factor": {
+          "value": 0.0028,
+          "unit": "rm3/sm3",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.gas.pvt.points[3].viscosity": {
+          "value": 0.018,
+          "unit": "cP",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.water.pvt.points[0].pressure": {
+          "value": 300,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.water.pvt.points[0].formation_volume_factor": {
+          "value": 1.02,
+          "unit": "rm3/sm3",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.water.pvt.points[0].compressibility": {
+          "value": 4.2e-05,
+          "unit": "1/bar",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.water.pvt.points[0].viscosity": {
+          "value": 0.45,
+          "unit": "cP",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.oil.density": {
+          "value": 850,
+          "unit": "kg/m3",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.water.density": {
+          "value": 1010,
+          "unit": "kg/m3",
+          "absolute_tolerance": 1e-08
+        },
+        "fluids.gas.density": {
+          "value": 0.95,
+          "unit": "kg/m3",
+          "absolute_tolerance": 1e-08
+        },
+        "rock.reference_pressure": {
+          "value": 300,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "rock.compressibility": {
+          "value": 4.5e-05,
+          "unit": "1/bar",
+          "absolute_tolerance": 1e-08
+        }
+      },
+      "categorical": {}
+    },
+    "7": {
+      "file": "07_scada_well_constraints.json",
+      "status": "success",
+      "quantities": {
+        "wells[0].controls[0].target": {
+          "value": 500,
+          "unit": "m3/day",
+          "absolute_tolerance": 1e-08
+        },
+        "wells[0].controls[0].constraints[0].value": {
+          "value": 80,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "wells[1].controls[0].target": {
+          "value": 500,
+          "unit": "m3/day",
+          "absolute_tolerance": 1e-08
+        },
+        "wells[1].controls[0].constraints[0].value": {
+          "value": 80,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "wells[2].controls[0].target": {
+          "value": 800,
+          "unit": "m3/day",
+          "absolute_tolerance": 1e-08
+        },
+        "wells[2].controls[0].constraints[0].value": {
+          "value": 420,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "schedule.duration": {
+          "value": 1825,
+          "unit": "day",
+          "absolute_tolerance": 1e-08
+        },
+        "schedule.report_interval": {
+          "value": 91.25,
+          "unit": "day",
+          "absolute_tolerance": 1e-08
+        }
+      },
+      "categorical": {
+        "wells[0].id": "A15",
+        "wells[0].well_type": "producer",
+        "wells[0].controls[0].control_type": "liquid_rate",
+        "wells[0].controls[0].constraints[0].constraint_type": "minimum_bhp",
+        "wells[1].id": "B2",
+        "wells[1].well_type": "producer",
+        "wells[1].controls[0].control_type": "liquid_rate",
+        "wells[1].controls[0].constraints[0].constraint_type": "minimum_bhp",
+        "wells[2].id": "C1",
+        "wells[2].well_type": "water_injector",
+        "wells[2].controls[0].control_type": "water_injection_rate",
+        "wells[2].controls[0].constraints[0].constraint_type": "maximum_bhp"
+      }
+    },
+    "8": {
+      "file": "08_customer_B_production.csv",
+      "status": "success",
+      "quantities": {
+        "wells[0].controls[0].target": {
+          "value": 500,
+          "unit": "m3/day",
+          "absolute_tolerance": 0.05
+        },
+        "wells[0].controls[0].constraints[0].value": {
+          "value": 80,
+          "unit": "bar",
+          "absolute_tolerance": 0.002
+        },
+        "wells[1].controls[0].target": {
+          "value": 500,
+          "unit": "m3/day",
+          "absolute_tolerance": 0.05
+        },
+        "wells[1].controls[0].constraints[0].value": {
+          "value": 80,
+          "unit": "bar",
+          "absolute_tolerance": 0.002
+        },
+        "wells[2].controls[0].target": {
+          "value": 800,
+          "unit": "m3/day",
+          "absolute_tolerance": 0.05
+        },
+        "wells[2].controls[0].constraints[0].value": {
+          "value": 420,
+          "unit": "bar",
+          "absolute_tolerance": 0.002
+        }
+      },
+      "categorical": {
+        "wells[0].id": "A15",
+        "wells[0].well_type": "producer",
+        "wells[0].controls[0].control_type": "liquid_rate",
+        "wells[0].controls[0].constraints[0].constraint_type": "minimum_bhp",
+        "wells[1].id": "B2",
+        "wells[1].well_type": "producer",
+        "wells[1].controls[0].control_type": "liquid_rate",
+        "wells[1].controls[0].constraints[0].constraint_type": "minimum_bhp",
+        "wells[2].id": "C1",
+        "wells[2].well_type": "water_injector",
+        "wells[2].controls[0].control_type": "water_injection_rate",
+        "wells[2].controls[0].constraints[0].constraint_type": "maximum_bhp"
+      }
+    },
+    "9": {
+      "file": "09_engineer_notes.txt",
+      "status": "success",
+      "quantities": {
+        "wells[0].controls[0].target": {
+          "value": 500,
+          "unit": "m3/day",
+          "absolute_tolerance": 1e-08
+        },
+        "wells[0].controls[0].constraints[0].value": {
+          "value": 80,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "wells[1].controls[0].target": {
+          "value": 500,
+          "unit": "m3/day",
+          "absolute_tolerance": 1e-08
+        },
+        "wells[1].controls[0].constraints[0].value": {
+          "value": 80,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "wells[2].controls[0].target": {
+          "value": 800,
+          "unit": "m3/day",
+          "absolute_tolerance": 1e-08
+        },
+        "wells[2].controls[0].constraints[0].value": {
+          "value": 420,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "schedule.duration": {
+          "value": 1825,
+          "unit": "day",
+          "absolute_tolerance": 1e-08
+        },
+        "schedule.report_interval": {
+          "value": 90,
+          "unit": "day",
+          "absolute_tolerance": 1e-08
+        }
+      },
+      "categorical": {
+        "wells[0].id": "A15",
+        "wells[0].well_type": "producer",
+        "wells[0].controls[0].control_type": "liquid_rate",
+        "wells[0].controls[0].constraints[0].constraint_type": "minimum_bhp",
+        "wells[1].id": "B2",
+        "wells[1].well_type": "producer",
+        "wells[1].controls[0].control_type": "liquid_rate",
+        "wells[1].controls[0].constraints[0].constraint_type": "minimum_bhp",
+        "wells[2].id": "C1",
+        "wells[2].well_type": "water_injector",
+        "wells[2].controls[0].control_type": "water_injection_rate",
+        "wells[2].controls[0].constraints[0].constraint_type": "maximum_bhp"
+      }
+    },
+    "10": {
+      "file": "10_integrated_vendor_export.json",
+      "status": "success",
+      "quantities": {
+        "scal.relative_permeability[0].points[0].sw": {
+          "value": 0.15,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[0].krw": {
+          "value": 0,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[0].kro": {
+          "value": 0.9,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[0].pcow": {
+          "value": 0.35,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[1].sw": {
+          "value": 0.3,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[1].krw": {
+          "value": 0.048,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[1].kro": {
+          "value": 0.552,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[1].pcow": {
+          "value": 0.18,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[2].sw": {
+          "value": 0.5,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[2].krw": {
+          "value": 0.205,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[2].kro": {
+          "value": 0.251,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[2].pcow": {
+          "value": 0.07,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[3].sw": {
+          "value": 0.7,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[3].krw": {
+          "value": 0.512,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[3].kro": {
+          "value": 0.048,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[3].pcow": {
+          "value": 0.02,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[4].sw": {
+          "value": 0.9,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[4].krw": {
+          "value": 0.8,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[4].kro": {
+          "value": 0,
+          "unit": "fraction",
+          "absolute_tolerance": 1e-08
+        },
+        "scal.relative_permeability[0].points[4].pcow": {
+          "value": 0,
+          "unit": "bar",
+          "absolute_tolerance": 1e-08
+        },
+        "schedule.duration": {
+          "value": 1825,
+          "unit": "day",
+          "absolute_tolerance": 1e-08
+        },
+        "schedule.report_interval": {
+          "value": 91.25,
+          "unit": "day",
+          "absolute_tolerance": 1e-08
+        }
+      },
+      "categorical": {
+        "scal.relative_permeability[0].sample_id": "X-12"
+      }
+    }
+  }
+}

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from reservoir_data_translator.canonical import ReservoirSimulationModel
+from reservoir_data_translator.canonical import PhysicalValue, ReservoirSimulationModel
 from reservoir_data_translator.mappers import (
     CMGDemoMapper,
     EclipseDemoMapper,
@@ -10,7 +10,7 @@ from reservoir_data_translator.mappers import (
     PlatformMappingError,
     PlatformMappingRegistry,
 )
-from reservoir_data_translator.ontology import OntologyRegistry
+from reservoir_data_translator.ontology import OntologyRegistry, SemanticContext
 from reservoir_data_translator.validation import ExportValidator, ValidationEngine
 
 
@@ -146,3 +146,68 @@ def test_platform_mapper_registry_routes_targets(platform_mappers) -> None:
     assert registry.get("ECLIPSE") is eclipse
     with pytest.raises(KeyError, match="petrel"):
         registry.get("petrel")
+
+
+def test_platform_rules_distinguish_reused_pvt_concept_by_context(
+    registry: OntologyRegistry,
+) -> None:
+    mappings = PlatformMappingRegistry.load(PROJECT_ROOT / "mappings" / "eclipse.yaml", registry)
+
+    for phase, keyword in (("oil", "PVDO"), ("water", "PVTW"), ("gas", "PVDG")):
+        context = SemanticContext(scope="pvt", phase=phase, role="model")
+        assert mappings.target_for("fluid.pvt", context) == keyword
+        assert mappings.supports("fluid.pvt", context)
+    with pytest.raises(KeyError, match="context"):
+        mappings.target_for("fluid.pvt")
+    assert not mappings.supports("fluid.pvt")
+
+
+def test_platform_rule_rejects_invalid_scope_and_duplicate_identity(
+    registry: OntologyRegistry,
+) -> None:
+    rule = {
+        "concept_id": "fluid.pvt",
+        "semantic_context": {"scope": "rock", "phase": "gas", "role": "model"},
+        "target_type": "PVDG",
+    }
+    payload = {
+        "platform": "eclipse", "version": "test", "dialect": "test",
+        "mappings": {"pvt_gas": rule},
+    }
+    with pytest.raises(ValueError):
+        PlatformMappingRegistry.from_mapping(payload, registry)
+
+    rule["semantic_context"]["scope"] = "pvt"
+    payload["mappings"]["same_semantics"] = dict(rule)
+    with pytest.raises(ValueError, match="Duplicate semantic output mapping"):
+        PlatformMappingRegistry.from_mapping(payload, registry)
+
+    rule.pop("semantic_context")
+    payload["mappings"] = {"pvt_unspecified": rule}
+    with pytest.raises(ValueError, match="explicit semantic_context"):
+        PlatformMappingRegistry.from_mapping(payload, registry)
+
+
+@pytest.mark.parametrize("field", ["compressibility", "viscosibility"])
+@pytest.mark.parametrize("phase_name", ["oil", "gas"])
+def test_eclipse_export_refuses_to_drop_unsupported_pvt_properties(
+    canonical_demo: ReservoirSimulationModel,
+    platform_mappers,
+    field: str,
+    phase_name: str,
+) -> None:
+    eclipse, _ = platform_mappers
+    phase = getattr(canonical_demo.fluids, phase_name)
+    if phase.pvt is None:
+        phase.pvt = canonical_demo.fluids.oil.pvt.model_copy(deep=True)
+    setattr(phase.pvt.points[0], field, PhysicalValue(value=1e-5, unit="1/bar"))
+
+    validation = eclipse.validate_export(canonical_demo)
+
+    assert any(
+        issue.code == "ECLIPSE_PVT_PROPERTY_UNSUPPORTED"
+        and issue.path == f"fluids.{phase_name}.pvt.points[0].{field}"
+        for issue in validation.errors
+    )
+    with pytest.raises(PlatformMappingError):
+        eclipse.export(canonical_demo)

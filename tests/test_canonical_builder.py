@@ -10,6 +10,11 @@ from reservoir_data_translator.canonical import (
     ReservoirSimulationModel,
 )
 from reservoir_data_translator.ontology import OntologyRegistry
+from reservoir_data_translator.ontology.context import SemanticContext
+from reservoir_data_translator.canonical.mapping_contract import (
+    get_canonical_mapping_contract,
+    normalize_semantic_identity,
+)
 from reservoir_data_translator.semantic import SemanticMapping
 
 
@@ -241,6 +246,60 @@ def test_builder_output_is_independent_of_mapping_order(
     assert forward == reverse
 
 
+def test_builder_contextual_ir_preserves_complete_legacy_model(
+    registry: OntologyRegistry,
+    demo_mappings: list[SemanticMapping],
+) -> None:
+    migrated = []
+    for mapping in demo_mappings:
+        concept_id, context = normalize_semantic_identity(mapping.ontology_concept)
+        contract = get_canonical_mapping_contract(concept_id, context)
+        assert contract is not None
+        migrated.append(mapping.model_copy(update={
+            "ontology_concept": concept_id, "context": context,
+            "selectors": contract.extract_selectors(mapping.canonical_path),
+        }))
+    assert CanonicalBuilder(registry).build(migrated) == CanonicalBuilder(registry).build(demo_mappings)
+
+
+@pytest.mark.parametrize(("context", "selectors", "path", "code"), [
+    (None, {}, "fluids.oil.density", "SEMANTIC_CONTEXT_REQUIRED"),
+    ({"scope": "pvt", "phase": "oil", "role": "property"}, {},
+     "fluids.oil.density", "INVALID_SEMANTIC_CONTEXT"),
+    ({"scope": "fluid_properties", "phase": "gas", "role": "property"}, {},
+     "fluids.oil.density", "CANONICAL_PATH_MISMATCH"),
+    ({"scope": "fluid_properties", "phase": "oil", "role": "property"}, {"point_index": 0},
+     "fluids.oil.density", "INVALID_CANONICAL_SELECTORS"),
+])
+def test_builder_revalidates_context_and_selectors(registry, context, selectors, path, code) -> None:
+    mapping = _mapping("physical.density", path, 850, source_unit="kg/m3").model_copy(update={
+        "context": SemanticContext(**context) if context else None, "selectors": selectors,
+    })
+    with pytest.raises(CanonicalBuildError) as error:
+        CanonicalBuilder(registry).build([mapping])
+    assert error.value.code == code
+
+
+def test_builder_rejects_legacy_id_with_conflicting_context(registry: OntologyRegistry) -> None:
+    mapping = _mapping("fluid.oil.density", "fluids.oil.density", 850, source_unit="kg/m3").model_copy(update={
+        "context": SemanticContext(scope="fluid_properties", phase="gas", role="property"),
+    })
+    with pytest.raises(CanonicalBuildError) as error:
+        CanonicalBuilder(registry).build([mapping])
+    assert error.value.code == "SEMANTIC_CONTEXT_CONFLICT"
+
+
+@pytest.mark.parametrize(("value", "code"), [
+    ({"id": "other-table", "phase_system": ["oil", "water"]}, "ENTITY_SELECTOR_MISMATCH"),
+    ({"phase_system": ["oil", "gas"]}, "SEMANTIC_CONTEXT_CONFLICT"),
+])
+def test_builder_checks_table_metadata_against_semantic_context(registry, value, code) -> None:
+    mapping = _mapping("scal.relative_permeability", "scal.relative_permeability[ow-1]", value)
+    with pytest.raises(CanonicalBuildError) as error:
+        CanonicalBuilder(registry).build([mapping])
+    assert error.value.code == code
+
+
 def test_builder_rejects_invented_concept(registry: OntologyRegistry) -> None:
     mapping = _mapping(
         "fluid.oil.magic_number",
@@ -286,7 +345,7 @@ def test_builder_rejects_canonical_unit_not_owned_by_ontology(
     assert error.value.code == "CANONICAL_UNIT_MISMATCH"
 
 
-def test_builder_does_not_silently_discard_duplicate_evidence(
+def test_builder_accepts_idempotent_duplicate_evidence(
     registry: OntologyRegistry,
 ) -> None:
     mapping = _mapping(
@@ -296,8 +355,62 @@ def test_builder_does_not_silently_discard_duplicate_evidence(
         source_unit="year",
         canonical_unit="day",
     )
+    duplicate = _mapping(
+        "schedule.duration",
+        "schedule.duration",
+        5,
+        source_unit="year",
+        canonical_unit="day",
+        block="supporting-block",
+    )
+
+    model = CanonicalBuilder(registry).build([mapping, duplicate])
+
+    assert model.schedule.duration is not None
+    assert model.schedule.duration.value == pytest.approx(1825.0)
+
+
+def test_builder_accepts_duplicate_structural_parent_from_text_and_table(
+    registry: OntologyRegistry,
+    demo_mappings: list[SemanticMapping],
+) -> None:
+    parent = next(
+        mapping
+        for mapping in demo_mappings
+        if mapping.ontology_concept == "scal.relative_permeability"
+    )
+    duplicate = _mapping(
+        parent.ontology_concept,
+        parent.canonical_path,
+        parent.value,
+        block="pdf-table-block",
+    )
+
+    model = CanonicalBuilder(registry).build([*demo_mappings, duplicate])
+
+    assert model.scal.relative_permeability[0].id == "ow-relperm-1"
+
+
+def test_builder_still_rejects_conflicting_duplicate_evidence(
+    registry: OntologyRegistry,
+) -> None:
+    first = _mapping(
+        "schedule.duration",
+        "schedule.duration",
+        5,
+        source_unit="year",
+        canonical_unit="day",
+    )
+    second = _mapping(
+        "schedule.duration",
+        "schedule.duration",
+        6,
+        source_unit="year",
+        canonical_unit="day",
+        block="other-block",
+    )
 
     with pytest.raises(CanonicalBuildError) as error:
-        CanonicalBuilder(registry).build([mapping, mapping])
+        CanonicalBuilder(registry).build([first, second])
 
     assert error.value.code == "DUPLICATE_CANONICAL_ASSIGNMENT"

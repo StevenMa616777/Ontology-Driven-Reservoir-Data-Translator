@@ -1,0 +1,225 @@
+{
+  "quarterly": {
+    "origin_trace_id": "c8918636-a3ed-461e-bd65-29b6e175b7df",
+    "response": {
+      "mappings": [
+        {
+          "status": "MAPPED",
+          "source_block_id": "block_0005",
+          "ontology_concept": "schedule.duration",
+          "context": {
+            "scope": "schedule",
+            "role": "duration"
+          },
+          "selectors": {},
+          "value": 5,
+          "source_text": "5",
+          "source_unit": "years",
+          "canonical_unit": "day",
+          "confidence": 0.9
+        },
+        {
+          "status": "MAPPED",
+          "source_block_id": "block_0005",
+          "ontology_concept": "schedule.report_interval",
+          "context": {
+            "scope": "schedule",
+            "role": "report_interval"
+          },
+          "selectors": {},
+          "value": "QUARTERLY",
+          "source_text": "QUARTERLY",
+          "confidence": 0.85
+        }
+      ]
+    }
+  },
+  "constraint_target": {
+    "origin_trace_id": "4a441f9e-4450-4973-b5cc-a535f171d4a2",
+    "response": {
+      "mappings": [
+        {
+          "status": "MAPPED",
+          "source_text": null,
+          "source_block_id": "block_0001",
+          "ontology_concept": "well",
+          "context": null,
+          "selectors": {
+            "well_id": "A15"
+          },
+          "canonical_path": null,
+          "value": "A15",
+          "source_unit": null,
+          "canonical_unit": null,
+          "confidence": 0.95
+        },
+        {
+          "status": "MAPPED",
+          "source_text": null,
+          "source_block_id": "block_0001",
+          "ontology_concept": "well.producer",
+          "context": null,
+          "selectors": {
+            "well_id": "A15"
+          },
+          "canonical_path": null,
+          "value": "producer",
+          "source_unit": null,
+          "canonical_unit": null,
+          "confidence": 0.95
+        },
+        {
+          "status": "MAPPED",
+          "source_text": null,
+          "source_block_id": "block_0001",
+          "ontology_concept": "well.control.liquid_rate",
+          "context": null,
+          "selectors": {
+            "well_id": "A15"
+          },
+          "canonical_path": null,
+          "value": 3144.7,
+          "source_unit": "bbl/day",
+          "canonical_unit": "m3/day",
+          "confidence": 0.9
+        },
+        {
+          "status": "MAPPED",
+          "source_text": null,
+          "source_block_id": "block_0001",
+          "ontology_concept": "well.constraint.minimum_bhp",
+          "context": null,
+          "selectors": {
+            "well_id": "A15"
+          },
+          "canonical_path": null,
+          "value": 1160.3,
+          "source_unit": "psi",
+          "canonical_unit": "bar",
+          "confidence": 0.9
+        },
+        {
+          "status": "MAPPED",
+          "source_text": null,
+          "source_block_id": "block_0001",
+          "ontology_concept": "well",
+          "context": null,
+          "selectors": {
+            "well_id": "B2"
+          },
+          "canonical_path": null,
+          "value": "B2",
+          "source_unit": null,
+          "canonical_unit": null,
+          "confidence": 0.95
+        },
+        {
+          "status": "MAPPED",
+          "source_text": null,
+          "source_block_id": "block_0001",
+          "ontology_concept": "well.producer",
+          "context": null,
+          "selectors": {
+            "well_id": "B2"
+          },
+          "canonical_path": null,
+          "value": "producer",
+          "source_unit": null,
+          "canonical_unit": null,
+          "confidence": 0.95
+        },
+        {
+          "status": "MAPPED",
+          "source_text": null,
+          "source_block_id": "block_0001",
+          "ontology_concept": "well.control.liquid_rate",
+          "context": null,
+          "selectors": {
+            "well_id": "B2"
+          },
+          "canonical_path": null,
+          "value": 3144.7,
+          "source_unit": "bbl/day",
+          "canonical_unit": "m3/day",
+          "confidence": 0.9
+        },
+        {
+          "status": "MAPPED",
+          "source_text": null,
+          "source_block_id": "block_0001",
+          "ontology_concept": "well.constraint.minimum_bhp",
+          "context": null,
+          "selectors": {
+            "well_id": "B2"
+          },
+          "canonical_path": null,
+          "value": 1160.3,
+          "source_unit": "psi",
+          "canonical_unit": "bar",
+          "confidence": 0.9
+        },
+        {
+          "status": "MAPPED",
+          "source_text": null,
+          "source_block_id": "block_0001",
+          "ontology_concept": "well",
+          "context": null,
+          "selectors": {
+            "well_id": "C1"
+          },
+          "canonical_path": null,
+          "value": "C1",
+          "source_unit": null,
+          "canonical_unit": null,
+          "confidence": 0.95
+        },
+        {
+          "status": "MAPPED",
+          "source_text": null,
+          "source_block_id": "block_0001",
+          "ontology_concept": "well.water_injector",
+          "context": null,
+          "selectors": {
+            "well_id": "C1"
+          },
+          "canonical_path": null,
+          "value": "water_injector",
+          "source_unit": null,
+          "canonical_unit": null,
+          "confidence": 0.95
+        },
+        {
+          "status": "MAPPED",
+          "source_text": null,
+          "source_block_id": "block_0001",
+          "ontology_concept": "well.control.water_injection_rate",
+          "context": null,
+          "selectors": {
+            "well_id": "C1"
+          },
+          "canonical_path": null,
+          "value": 5031.6,
+          "source_unit": "bbl/day",
+          "canonical_unit": "m3/day",
+          "confidence": 0.9
+        },
+        {
+          "status": "MAPPED",
+          "source_text": null,
+          "source_block_id": "block_0001",
+          "ontology_concept": "well.constraint.maximum_bhp",
+          "context": null,
+          "selectors": {
+            "well_id": "C1",
+            "control_type": "bhp"
+          },
+          "canonical_path": null,
+          "value": 6091.6,
+          "source_unit": "psi",
+          "canonical_unit": "bar",
+          "confidence": 0.9
+        }
+      ]
+    }
+  }
+}

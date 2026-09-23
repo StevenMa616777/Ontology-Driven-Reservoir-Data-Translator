@@ -6,7 +6,7 @@ def _ids(registry: OntologyRegistry, query: str) -> list[str]:
 
 
 def test_alias_lookup_is_case_insensitive(registry: OntologyRegistry) -> None:
-    assert _ids(registry, "krw") == ["scal.relative_permeability.krw"]
+    assert _ids(registry, "krw") == ["physical.relative_permeability"]
 
 
 def test_alias_lookup_handles_field_name_separators(

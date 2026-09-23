@@ -16,6 +16,8 @@ async def test_workbench_root_serves_design_pipeline(
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
+    assert response.headers["cache-control"] == "no-store, max-age=0"
+    assert response.headers["x-reservoir-ui-version"] == "ontology-context-v4"
     assert "Reservoir Translator Workbench" in response.text
     assert "Source" in response.text
     assert "Semantic" in response.text
@@ -24,6 +26,8 @@ async def test_workbench_root_serves_design_pipeline(
     assert "Target" in response.text
     assert 'id="source-input"' in response.text
     assert 'id="run-button"' in response.text
+    assert "/ui/app.js?v=ontology-context-v4" in response.text
+    assert 'accept=".txt,.dat,.json,.csv,.xlsx,.pdf"' in response.text
     await client.aclose()
 
 
@@ -39,30 +43,59 @@ async def test_workbench_assets_expose_real_pipeline_and_review_gate(
 
     assert javascript.status_code == 200
     assert javascript.headers["content-type"].startswith("text/javascript")
+    assert javascript.headers["cache-control"] == "no-store, max-age=0"
     assert 'postJson("/translate"' in javascript.text
     assert 'mapping.confidence < 0.80' in javascript.text
     assert 'mapping.status !== "MAPPED"' in javascript.text
     assert "function openSelectedFile()" in javascript.text
     assert 'txt: "text/plain;charset=utf-8"' in javascript.text
+    assert '"xlsx", "pdf"' in javascript.text
     assert "URL.createObjectURL(previewFile)" in javascript.text
     assert 'fileSummary.addEventListener("click"' in javascript.text
     assert 'data-toggle="deepseek-trace"' in javascript.text
     assert "renderDeepSeekTraceDetail" in javascript.text
+    assert "LLM 请求、响应与 Token 明细" in javascript.text
+    assert "PIPELINE DIAGNOSTICS V3" in javascript.text
+    assert "groupDeepSeekCalls" in javascript.text
+    assert "renderTraceBlockGroup" in javascript.text
+    assert 'class="trace-block-group' in javascript.text
     assert "call.request_payload" in javascript.text
     assert "call.response_payload" in javascript.text
+    assert "call.error_message" in javascript.text
+    assert "call.error_details" in javascript.text
+    assert "renderTraceDiff" in javascript.text
+    assert "groupTraceCallChains" in javascript.text
+    assert "renderPromptSemanticView" in javascript.text
+    assert "traceDiagnosisText" in javascript.text
+    assert 'data-trace-filter="problems"' in javascript.text
+    assert "输入未变化" in javascript.text
+    assert "重试额外消耗" in javascript.text
+    assert 'data-trace-copy="diagnosis"' in javascript.text
+    assert 'data-trace-copy="output"' in javascript.text
     assert "本地更正通过" in javascript.text
     assert "避免网络重试" in javascript.text
     assert "call.local_correction" in javascript.text
-    assert "输出尝试 / 网络尝试" in javascript.text
+    assert "失败尝试 → 后续结果的字段差异" in javascript.text
     assert "readable_log_url" in javascript.text
     assert "查看去除转义与特殊字符的易读日志" in javascript.text
+    assert "本次转换未完成" in javascript.text
+    assert "PIPELINE_STAGE_LABELS" in javascript.text
+    assert "阻断点" in javascript.text
+    assert "renderFailureLocation" in javascript.text
+    assert "renderResultFailureDiagnosis" in javascript.text
+    assert "error.diagnostics" in javascript.text
     assert stylesheet.status_code == 200
     assert stylesheet.headers["content-type"].startswith("text/css")
     assert ".readable-text body { zoom: 1.1; }" in stylesheet.text
     assert ".mapping-row" in stylesheet.text
     assert ".validation-grid" in stylesheet.text
     assert ".file-summary:hover" in stylesheet.text
-    assert ".deepseek-trace-table" in stylesheet.text
+    assert ".trace-block-group" in stylesheet.text
+    assert ".trace-error-panel" in stylesheet.text
+    assert ".trace-diff-panel" in stylesheet.text
+    assert ".failure-stage" in stylesheet.text
+    assert ".failure-diagnosis-section" in stylesheet.text
+    assert ".result-failure-diagnosis" in stylesheet.text
     await client.aclose()
 
 

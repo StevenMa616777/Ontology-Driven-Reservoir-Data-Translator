@@ -22,12 +22,15 @@ def normalizer() -> UnitNormalizer:
         (1000, "kPa", "bar", 10.0),
         (1, "MPa", "bar", 10.0),
         (1, "m3/day", "bbl/day", 6.289810770432105),
+        (1, "mPa.s", "cP", 1.0),
+        (1, "mPa·s", "cP", 1.0),
         (1, "Pa.s", "cP", 1000.0),
         (1, "g/cm3", "kg/m3", 1000.0),
         (3, "month", "day", 90.0),
         (1, "quarter", "day", 91.25),
         (5, "year", "day", 1825.0),
         (1, "1/psi", "1/bar", 14.503773773020923),
+        (4.2e-5, "/bar", "1/bar", 4.2e-5),
     ],
 )
 def test_supported_conversions_are_deterministic(

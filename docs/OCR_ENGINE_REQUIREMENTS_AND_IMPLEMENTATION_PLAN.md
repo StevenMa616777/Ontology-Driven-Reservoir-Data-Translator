@@ -140,6 +140,8 @@ PDF 页面 → 渲染图像 → 项目 OCREngine
 
 依据阶段 0 样本选择或训练专用拆表模型；它须能够对父表提出子表候选，并给出可核查的边界/结构信息。先单独评估模型，再接入 `TableEngine` 的递归、终止条件、结构检查、树保存和叶子输出。仍以现有 `RawBlock` 格式为下游出口。
 
+现成模型调研、拆分输入输出、评价样本、实验矩阵和接入条件见 [`LOGICAL_TABLE_DECOMPOSITION_REQUIREMENTS_AND_MODEL_EVALUATION.md`](LOGICAL_TABLE_DECOMPOSITION_REQUIREMENTS_AND_MODEL_EVALUATION.md)。
+
 **交付：** 对多表组合样本产出可追溯的树与正确的叶子表；普通单表不被无故拆分；不确定结果能弃权并触发复核。
 
 ### 阶段 4：人工复核及现有 chunking 衔接

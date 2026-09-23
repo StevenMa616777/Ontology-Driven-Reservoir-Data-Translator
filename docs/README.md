@@ -13,7 +13,8 @@
 ## 设计合同
 
 - [`DESIGN.md`](../DESIGN.md)：Ontology-Driven 架构和 Tasks 1-12 的详细设计基线。
-- [`OCR_ENGINE_REQUIREMENTS_AND_IMPLEMENTATION_PLAN.md`](OCR_ENGINE_REQUIREMENTS_AND_IMPLEMENTATION_PLAN.md)：项目 OCR Engine、逻辑子表递归拆分、人工复核的需求与分阶段实施方案；当前为设计，尚未实施。
+- [`OCR_ENGINE_REQUIREMENTS_AND_IMPLEMENTATION_PLAN.md`](OCR_ENGINE_REQUIREMENTS_AND_IMPLEMENTATION_PLAN.md)：项目 OCR Engine、逻辑子表递归拆分、人工复核的总体需求与分阶段实施方案；接口、编排、复核和下游衔接已实现，逻辑拆表模型仍待验证。
+- [`LOGICAL_TABLE_DECOMPOSITION_REQUIREMENTS_AND_MODEL_EVALUATION.md`](LOGICAL_TABLE_DECOMPOSITION_REQUIREMENTS_AND_MODEL_EVALUATION.md)：逻辑子表拆分的专项目标、数据契约、现成模型调研矩阵、评价指标和接入条件。
 - [`ONTOLOGY_CONVENTIONS.md`](../ONTOLOGY_CONVENTIONS.md)：Ontology 受控词汇、关系、单位和版本约定。
 - [`mappings/README.md`](../mappings/README.md)：Source Mapping 与 Platform Mapping 的边界。
 

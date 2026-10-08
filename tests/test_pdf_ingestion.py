@@ -1,14 +1,28 @@
 import base64
+from dataclasses import replace
 from io import BytesIO
 import json
+from pathlib import Path
 
 import pytest
+from PIL import Image
 from reportlab.lib.pagesizes import letter
+from reportlab.lib.pdfencrypt import StandardEncryption
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 from reportlab.platypus import Table, TableStyle
 
-from reservoir_data_translator.ingestion import IngestionError, PdfParser, parse_document
+from reservoir_data_translator.ingestion import (
+    IngestionError,
+    OcrBackendError,
+    OcrPageResult,
+    OcrRegion,
+    OcrReviewRequired,
+    OcrTable,
+    PaddleOcrBackend,
+    PdfParser,
+    parse_document,
+)
 
 
 _PIXEL_PNG = base64.b64decode(
@@ -69,6 +83,100 @@ def _image_only_pdf(path) -> None:
         height=letter[1],
     )
     pdf.save()
+
+
+def _restricted_image_pdf(path, *, full_page: bool = False) -> None:
+    encryption = StandardEncryption(
+        "",
+        ownerPassword="fixture-owner",
+        canPrint=1,
+        canModify=0,
+        canCopy=0,
+        canAnnotate=0,
+    )
+    pdf = canvas.Canvas(str(path), pagesize=letter, encrypt=encryption)
+    width, height = letter if full_page else (240, 320)
+    pdf.drawImage(
+        ImageReader(BytesIO(_PIXEL_PNG)),
+        72,
+        72,
+        width=width,
+        height=height,
+    )
+    pdf.save()
+
+
+def _mixed_pdf(path) -> None:
+    pdf = canvas.Canvas(str(path), pagesize=letter)
+    pdf.drawString(72, 720, "Native reservoir text")
+    pdf.showPage()
+    pdf.drawImage(
+        ImageReader(BytesIO(_PIXEL_PNG)),
+        0,
+        0,
+        width=letter[0],
+        height=letter[1],
+    )
+    pdf.save()
+
+
+class _FakeOcrBackend:
+    def __init__(self, *, low_confidence: bool = False) -> None:
+        self.pages: list[int] = []
+        self.low_confidence = low_confidence
+
+    def analyze_page(self, image, *, page_number: int, languages: tuple[str, ...]):
+        self.pages.append(page_number)
+        width, height = image.size
+        confidence = 0.4 if self.low_confidence else 0.96
+        flags = ("LOW_TEXT_CONFIDENCE",) if self.low_confidence else ()
+        return OcrPageResult(
+            page_number=page_number,
+            image_width=width,
+            image_height=height,
+            engine="fake-layout-ocr",
+            engine_version="1.0",
+            model_version="fixture-v1",
+            preprocessing=("orientation",),
+            regions=(
+                OcrRegion(
+                    region_id="title",
+                    region_type="text",
+                    layout_label="text",
+                    bbox_pixels=(10, 10, width - 10, 80),
+                    reading_order=1,
+                    text="Minimum bottom-hole pressure is 80 bar.",
+                    confidence=confidence,
+                    quality_flags=flags,
+                ),
+                OcrRegion(
+                    region_id="pvt-table",
+                    region_type="table",
+                    layout_label="table",
+                    bbox_pixels=(10, 100, width - 10, 250),
+                    reading_order=2,
+                    table=OcrTable(
+                        columns=["Pressure", "Rs", "Bo"],
+                        rows=[["100", "20", "1.02"]],
+                        metadata={"header_detected": True},
+                    ),
+                    confidence=0.94,
+                ),
+                OcrRegion(
+                    region_id="grid-figure",
+                    region_type="figure",
+                    layout_label="image",
+                    bbox_pixels=(10, 270, width - 10, height - 10),
+                    reading_order=3,
+                    confidence=0.91,
+                ),
+            ),
+        )
+
+
+class _FailingOcrBackend:
+    def analyze_page(self, image, *, page_number: int, languages: tuple[str, ...]):
+        raise OcrBackendError("PDF_OCR_TIMEOUT", "fixture timeout")
 
 
 def test_pdf_parser_extracts_non_overlapping_text_table_and_figure_blocks(tmp_path) -> None:
@@ -137,10 +245,11 @@ def test_pdf_text_recursively_splits_without_overlapping_primary_content(tmp_pat
         assert block.source_region is not None
         grouped.setdefault(block.source_region.parent_region_id, []).append(block)
         assert len(str(block.content).split()) <= 5
-    assert list(grouped) == ["page_0001_text_body"]
+    # Tables and figures are structural boundaries, not gaps to concatenate over.
+    assert len(grouped) == 2
 
     ordered = sorted(
-        text_blocks,
+        grouped["page_0001_text_body"],
         key=lambda block: block.source_region.source_span.start,  # type: ignore[union-attr]
     )
     previous_end = 0
@@ -151,6 +260,10 @@ def test_pdf_text_recursively_splits_without_overlapping_primary_content(tmp_pat
         assert len(block.content) == span.end - span.start
         previous_end = span.end
     assert "".join(block.content for block in ordered).count(long_sentence) == 1
+    for blocks in grouped.values():
+        spans = sorted((block.source_region.source_span for block in blocks), key=lambda span: span.start)
+        assert spans[0].start == 0
+        assert all(left.end == right.start for left, right in zip(spans, spans[1:]))
     assert any(
         block.source_region.extraction_method.endswith(":token")  # type: ignore[union-attr]
         for block in text_blocks
@@ -207,6 +320,336 @@ def test_pdf_parser_rejects_image_dominated_page_as_ocr_required(tmp_path) -> No
         PdfParser().parse(path)
 
     assert error.value.code == "PDF_OCR_REQUIRED"
+
+
+def test_pdf_parser_uses_image_presence_not_eighty_percent_coverage(tmp_path) -> None:
+    path = tmp_path / "small-scan.pdf"
+    _restricted_image_pdf(path)
+
+    with pytest.raises(IngestionError) as error:
+        PdfParser().parse(path)
+
+    assert error.value.code == "PDF_OCR_REQUIRED"
+    assert error.value.stage == "ocr_configuration"
+    assert error.value.details["image_coverage_by_page"]["1"] < 0.8
+
+
+def test_pdf_parser_routes_restricted_pdf_to_ocr_configuration(tmp_path) -> None:
+    path = tmp_path / "restricted.pdf"
+    _restricted_image_pdf(path)
+
+    with pytest.raises(IngestionError) as error:
+        PdfParser().parse(path)
+
+    assert error.value.code == "PDF_OCR_REQUIRED"
+    assert error.value.stage == "ocr_configuration"
+    assert error.value.stage_label == "OCR 配置"
+    assert error.value.details["restriction"] == "copy_and_text_extraction"
+    assert error.value.details["image_coverage_by_page"]["1"] < 0.8
+    assert "RESERVOIR_OCR_BACKEND" in (error.value.resolution or "")
+
+
+def test_pdf_parser_automatically_ocrs_restricted_pdf(
+    tmp_path,
+) -> None:
+    path = tmp_path / "restricted.pdf"
+    _restricted_image_pdf(path)
+    backend = _FakeOcrBackend()
+
+    document = PdfParser(
+        ocr_backend=backend,
+        ocr_render_dpi=72,
+    ).parse(path)
+
+    assert backend.pages == [1]
+    assert document.blocks[0].content == "Minimum bottom-hole pressure is 80 bar."
+    assert all(
+        block.extraction_evidence is not None
+        and "SOURCE_TEXT_EXTRACTION_RESTRICTED"
+        in block.extraction_evidence.quality_flags
+        for block in document.blocks
+    )
+
+
+def test_pdf_parser_converts_whole_scanned_document_to_existing_block_contract(
+    tmp_path,
+) -> None:
+    path = tmp_path / "scan.pdf"
+    _image_only_pdf(path)
+    backend = _FakeOcrBackend()
+
+    document = PdfParser(ocr_backend=backend, ocr_render_dpi=72).parse(path)
+
+    assert backend.pages == [1]
+    assert [block.block_type for block in document.blocks] == [
+        "text",
+        "table",
+        "figure",
+    ]
+    text, table, figure = document.blocks
+    assert text.content == "Minimum bottom-hole pressure is 80 bar."
+    assert table.content == {
+        "columns": ["Pressure", "Rs", "Bo"],
+        "rows": [["100", "20", "1.02"]],
+        "header_detected": True,
+        "ocr_region_id": "pvt-table",
+    }
+    assert figure.content["source"] == "scanned_page_region"
+    assert text.extraction_evidence is not None
+    assert text.extraction_evidence.engine == "fake-layout-ocr"
+    assert text.extraction_evidence.render_dpi == 72
+    assert text.source_region is not None
+    assert text.source_region.extraction_method == "pdf_ocr_text:page"
+    assert 0 <= text.source_region.bbox.x0 < text.source_region.bbox.x1 <= letter[0]
+
+
+def test_pdf_parser_rejects_native_and_scanned_page_mixture(tmp_path) -> None:
+    path = tmp_path / "hybrid.pdf"
+    _mixed_pdf(path)
+    backend = _FakeOcrBackend()
+
+    with pytest.raises(IngestionError) as error:
+        PdfParser(ocr_backend=backend, ocr_render_dpi=72).parse(path)
+
+    assert error.value.code == "PDF_HYBRID_UNSUPPORTED"
+    assert backend.pages == []
+
+
+def test_pdf_parser_can_reject_low_confidence_ocr(tmp_path) -> None:
+    path = tmp_path / "scan.pdf"
+    _image_only_pdf(path)
+
+    with pytest.raises(IngestionError) as error:
+        PdfParser(
+            ocr_backend=_FakeOcrBackend(low_confidence=True),
+            ocr_render_dpi=72,
+            reject_low_confidence_ocr=True,
+        ).parse(path)
+
+    assert error.value.code == "PDF_OCR_LOW_CONFIDENCE"
+
+
+def test_pdf_ocr_review_decisions_are_applied_before_chunking(tmp_path) -> None:
+    path = tmp_path / "scan.pdf"
+    _image_only_pdf(path)
+    parser = PdfParser(
+        ocr_backend=_FakeOcrBackend(low_confidence=True),
+        ocr_render_dpi=72, ocr_artifact_dir=tmp_path / "artifacts",
+    )
+
+    with pytest.raises(OcrReviewRequired) as pending:
+        parser.parse(path, review_ocr=True)
+
+    session = pending.value.session
+    assert len(session.issues) == 1
+    issue = session.issues[0]
+    assert (issue.page, issue.number, issue.block_id, issue.label) == (1, "R1", "title", "text")
+    assert issue.flags == ("LOW_TEXT_CONFIDENCE",)
+    assert issue.recognized_content == "Minimum bottom-hole pressure is 80 bar."
+    with pytest.raises(ValueError):
+        parser.finalize_ocr_review(session, {})
+
+    included = parser.finalize_ocr_review(session, {issue.issue_id: "include"})
+    assert included.blocks[0].content == issue.recognized_content
+    assert "LOW_TEXT_CONFIDENCE" in included.blocks[0].extraction_evidence.quality_flags
+
+    excluded = parser.finalize_ocr_review(session, {issue.issue_id: "exclude"})
+    assert all(block.block_type != "text" for block in excluded.blocks)
+    assert [block.block_type for block in excluded.blocks] == ["table", "figure"]
+
+
+def test_pdf_ocr_review_collects_every_problem_region_before_pausing(tmp_path) -> None:
+    class TwoIssues(_FakeOcrBackend):
+        def analyze_page(self, image, *, page_number, languages):
+            page = super().analyze_page(image, page_number=page_number, languages=languages)
+            second = replace(page.regions[0], region_id="second", reading_order=2,
+                             bbox_pixels=(10, 80, image.width - 10, 99),
+                             text="another uncertain region", source_region_index=2)
+            return replace(page, regions=(page.regions[0], second, *page.regions[1:]))
+
+    path = tmp_path / "scan.pdf"
+    _image_only_pdf(path)
+    parser = PdfParser(ocr_backend=TwoIssues(low_confidence=True),
+                       ocr_render_dpi=72, ocr_artifact_dir=tmp_path / "artifacts")
+    with pytest.raises(OcrReviewRequired) as pending:
+        parser.parse(path, review_ocr=True)
+    issues = pending.value.session.issues
+    assert [issue.number for issue in issues] == ["R1", "R2"]
+    assert {issue.block_id for issue in issues} == {"title", "second"}
+
+
+def test_paddle_region_index_matches_preview_without_renumbering_block_id() -> None:
+    payload = {
+        "parsing_res_list": [
+            {"block_id": 0, "block_label": "text", "block_bbox": [0, 0, 90, 20],
+             "block_content": "ordinary text"},
+            {"block_id": 15, "block_label": "formula", "block_bbox": [0, 30, 90, 70],
+             "block_content": "badly recognized formula"},
+            {"block_id": 16, "block_label": "text", "block_bbox": [0, 80, 90, 100],
+             "block_content": "uncertain text"},
+        ],
+        "overall_ocr_res": {"rec_boxes": [[0, 0, 90, 20], [0, 30, 90, 70], [0, 80, 90, 100]],
+                            "rec_scores": [0.95, 0.40, 0.40]},
+    }
+    regions = PaddleOcrBackend(minimum_confidence=0.70)._regions(payload)
+    assert [region.region_id for region in regions] == ["0", "15", "16"]
+    assert [region.source_region_index for region in regions] == [1, 2, 3]
+    assert regions[1].confidence == pytest.approx(0.40)
+    assert regions[1].layout_label == "formula"
+    assert regions[1].quality_flags == ()
+    assert regions[2].quality_flags == ("LOW_TEXT_CONFIDENCE",)
+
+
+@pytest.mark.parametrize("confidence,flags", [(0.40, ("LOW_TEXT_CONFIDENCE",)), (None, ())])
+def test_formula_skips_text_confidence_gate_but_keeps_evidence(confidence, flags) -> None:
+    region = OcrRegion(region_id="15", region_type="text", layout_label="formula",
+                       bbox_pixels=(0, 0, 90, 30), reading_order=15, text="uncertain formula",
+                       confidence=confidence, quality_flags=flags, source_region_index=16)
+    page = OcrPageResult(page_number=8, image_width=100, image_height=100,
+                         regions=(region,), engine="fake-layout-ocr")
+    blocks = PdfParser(reject_low_confidence_ocr=True)._ocr_blocks(
+        page, page_width=100, page_height=100, path=Path("scan.pdf"))
+    assert blocks
+    assert blocks[0].extraction_evidence.confidence == confidence
+    assert "LOW_TEXT_CONFIDENCE" not in blocks[0].extraction_evidence.quality_flags
+    assert "OCR_CONFIDENCE_UNAVAILABLE" not in blocks[0].extraction_evidence.quality_flags
+    assert blocks[0].parts[0].region_id == "15"
+
+
+def test_low_confidence_error_names_visible_region_number() -> None:
+    region = OcrRegion(region_id="15", region_type="text", layout_label="text",
+                       bbox_pixels=(0, 0, 90, 30), reading_order=15, text="uncertain text",
+                       confidence=0.40, quality_flags=("LOW_TEXT_CONFIDENCE",),
+                       source_region_index=16)
+    page = OcrPageResult(page_number=8, image_width=100, image_height=100,
+                         regions=(region,), engine="fake-layout-ocr")
+    with pytest.raises(IngestionError) as error:
+        PdfParser(reject_low_confidence_ocr=True)._ocr_blocks(
+            page, page_width=100, page_height=100, path=Path("scan.pdf"))
+    assert error.value.code == "PDF_OCR_LOW_CONFIDENCE"
+    assert "page 8, region R16: LOW_TEXT_CONFIDENCE" in str(error.value)
+    assert region.region_id == "15"
+
+
+def test_visible_region_number_uses_raw_position_after_ignored_region() -> None:
+    payload = {"parsing_res_list": [
+        {"block_id": 0, "block_label": "header", "block_bbox": [0, 0, 90, 20],
+         "block_content": "header"},
+        {"block_id": 1, "block_label": "text", "block_bbox": [0, 30, 90, 60],
+         "block_content": "uncertain text"},
+    ], "overall_ocr_res": {"rec_boxes": [[0, 30, 90, 60]], "rec_scores": [0.40]}}
+    regions = PaddleOcrBackend(minimum_confidence=0.70)._regions(payload)
+    assert len(regions) == 1
+    assert regions[0].region_id == "1"
+    assert regions[0].source_region_index == 2
+    page = OcrPageResult(page_number=1, image_width=100, image_height=100,
+                         regions=tuple(regions), engine="fake-layout-ocr")
+    with pytest.raises(IngestionError) as error:
+        PdfParser(reject_low_confidence_ocr=True)._ocr_blocks(
+            page, page_width=100, page_height=100, path=Path("scan.pdf"))
+    assert "region R2: LOW_TEXT_CONFIDENCE" in str(error.value)
+
+
+def test_low_confidence_table_still_requires_review() -> None:
+    region = OcrRegion(region_id="2", region_type="table", layout_label="table",
+                       bbox_pixels=(0, 0, 90, 30), reading_order=2,
+                       table=OcrTable(columns=["Pressure"], rows=[["100"]]),
+                       confidence=0.40, quality_flags=("TABLE_CELL_LOW_CONFIDENCE",),
+                       source_region_index=3)
+    page = OcrPageResult(page_number=1, image_width=100, image_height=100,
+                         regions=(region,), engine="fake-layout-ocr")
+    with pytest.raises(IngestionError) as error:
+        PdfParser(reject_low_confidence_ocr=True)._ocr_blocks(
+            page, page_width=100, page_height=100, path=Path("scan.pdf"))
+    assert "region R3: TABLE_CELL_LOW_CONFIDENCE" in str(error.value)
+
+
+def test_pdf_parser_translates_backend_failure_to_ingestion_error(tmp_path) -> None:
+    path = tmp_path / "scan.pdf"
+    _image_only_pdf(path)
+
+    with pytest.raises(IngestionError) as error:
+        PdfParser(ocr_backend=_FailingOcrBackend(), ocr_render_dpi=72).parse(path)
+
+    assert error.value.code == "PDF_OCR_TIMEOUT"
+
+
+def test_paddle_backend_normalizes_layout_text_table_and_figure() -> None:
+    class Result:
+        json = {
+            "width": 400,
+            "height": 300,
+            "model_settings": {"pipeline_name": "PP-StructureV3"},
+            "parsing_res_list": [
+                {
+                    "block_id": 1,
+                    "block_label": "text",
+                    "block_bbox": [10, 10, 390, 50],
+                    "block_order": 1,
+                    "block_content": "Reservoir pressure 100 bar",
+                },
+                {
+                    "block_id": 2,
+                    "block_label": "table",
+                    "block_bbox": [10, 70, 390, 180],
+                    "block_order": 2,
+                    "block_content": "",
+                },
+                {
+                    "block_id": 3,
+                    "block_label": "image",
+                    "block_bbox": [10, 200, 390, 290],
+                    "block_order": 3,
+                    "block_content": "",
+                },
+            ],
+            "overall_ocr_res": {
+                "rec_boxes": [[10, 10, 200, 40]],
+                "rec_scores": [0.98],
+            },
+            "table_res_list": [
+                {
+                    "pred_html": (
+                        "<table><tr><th>Pressure</th><th>Bo</th></tr>"
+                        "<tr><td>100</td><td>1.02</td></tr></table>"
+                    ),
+                    "table_ocr_pred": {"rec_scores": [0.96, 0.95]},
+                }
+            ],
+        }
+
+    class Pipeline:
+        def predict(self, image, **kwargs):
+            assert image.shape == (300, 400, 3)
+            return [Result()]
+
+    def factory(**kwargs):
+        assert kwargs["use_table_recognition"] is True
+        assert kwargs["use_formula_recognition"] is False
+        assert kwargs["use_doc_orientation_classify"] is False
+        assert kwargs["enable_mkldnn"] is False
+        assert kwargs["device"] == "gpu:0"
+        return Pipeline()
+
+    backend = PaddleOcrBackend(pipeline_factory=factory)
+
+    result = backend.analyze_page(
+        Image.new("RGB", (400, 300), "white"),
+        page_number=1,
+        languages=("ch", "en"),
+    )
+
+    assert [region.region_type for region in result.regions] == [
+        "text",
+        "table",
+        "figure",
+    ]
+    assert result.regions[0].confidence == pytest.approx(0.98)
+    assert result.regions[1].table == OcrTable(
+        columns=["Pressure", "Bo"],
+        rows=[["100", "1.02"]],
+        metadata={"header_detected": True},
+    )
 
 
 def test_pdf_parser_rejects_malformed_pdf_with_stable_error(tmp_path) -> None:

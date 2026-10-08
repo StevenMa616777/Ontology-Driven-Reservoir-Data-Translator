@@ -12,6 +12,8 @@ import hashlib
 import json
 import math
 import os
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from httpx import ASGITransport, AsyncClient
@@ -46,6 +48,11 @@ def compare(result, case):
         if result.get('canonical_model') or result.get('target'):
             errors.append({'kind': 'review_gate_bypassed'})
         return errors
+    for key in ('validation', 'export_validation'):
+        if not (result.get(key) or {}).get('valid'):
+            errors.append({'kind': key, 'actual': result.get(key)})
+    if not (result.get('target') or {}).get('content'):
+        errors.append({'kind': 'missing_target'})
     actual = flatten(result.get('canonical_model') or {})
     for path, expected in case['quantities'].items():
         observed = actual.get(path)
@@ -71,19 +78,41 @@ async def run(args):
     provider = DeepSeekProvider.from_environment(api_key_file=ROOT / 'LLM/DeepSeek/api_key',
                                                model='deepseek-v4-flash')
     app = create_app(provider=provider)
-    summary = {'requested_model': provider.model, 'cases': []}
+    summary = {'requested_model': provider.model, 'endpoint': args.endpoint,
+               'started_at': datetime.now(timezone.utc).isoformat(), 'cases': []}
     async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test', timeout=180) as client:
         for number in args.files:
             case = expectations[str(number)]
             source = dataset / case['file']
-            response = await client.post('/translate', json={
+            started = time.monotonic()
+            response = await client.post(args.endpoint, json={
                 'source': {'file_name': source.name, 'content': source.read_text()}, 'target_platform': 'eclipse'})
             result = response.json()
+            job = None
+            http_status = response.status_code
+            if args.endpoint == '/translation-jobs' and response.status_code == 202:
+                status_url = result['status_url']
+                while time.monotonic() - started < 1800:
+                    poll = await client.get(status_url)
+                    poll.raise_for_status()
+                    job = poll.json()
+                    if job['status'] in {'completed', 'failed', 'stopped', 'ocr_review_required'}:
+                        break
+                    await asyncio.sleep(.2)
+                (output / f'{number:02d}-job.json').write_text(json.dumps(job, ensure_ascii=False, indent=2) + '\n')
+                if job and job['status'] == 'completed':
+                    result, http_status = job['result'], 200
+                else:
+                    result = {'detail': (job or {}).get('error') or {
+                        'code': 'JOB_NOT_COMPLETED', 'message': (job or {}).get('status', 'unknown')}}
+                    http_status = 500
             (output / f'{number:02d}-result.json').write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
             errors = compare(result, case)
             entry = {'file': source.name, 'source_sha256': hashlib.sha256(source.read_bytes()).hexdigest(),
-                     'http_status': response.status_code, 'status': result.get('status'),
-                     'passed': response.status_code == 200 and not errors, 'differences': errors,
+                     'http_status': http_status, 'submission_http_status': response.status_code,
+                     'job_status': (job or {}).get('status'), 'elapsed_seconds': round(time.monotonic() - started, 3),
+                     'status': result.get('status'),
+                     'passed': http_status == 200 and not errors, 'differences': errors,
                      'failure': result.get('detail'), 'usage': result.get('deepseek_trace') or
                      (result.get('detail') or {}).get('diagnostics', {}).get('deepseek_trace')}
             summary['cases'].append(entry)
@@ -97,6 +126,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--real-provider', action='store_true', help='Explicitly enable billable provider calls.')
     parser.add_argument('--files', nargs='+', type=int, default=list(range(1, 11)))
+    parser.add_argument('--endpoint', choices=['/translate', '/translation-jobs'], default='/translation-jobs')
     parser.add_argument('--output-dir', type=Path, default=ROOT / 'artifacts/heterogeneous-regression')
     args = parser.parse_args()
     if not args.real_provider:

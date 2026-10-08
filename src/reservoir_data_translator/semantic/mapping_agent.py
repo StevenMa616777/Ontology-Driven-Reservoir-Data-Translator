@@ -290,7 +290,7 @@ Rules:
                     "block_type": context_block.block_type,
                     "source_location": context_block.source_location,
                     "source_region": (
-                        context_block.source_region.model_dump(mode="json")
+                        context_block.source_region.model_dump(mode="json", exclude={"parts"})
                         if context_block.source_region is not None
                         else None
                     ),

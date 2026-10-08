@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from .models import RawDocument
 
@@ -16,9 +18,17 @@ class IngestionError(ValueError):
         message: str,
         *,
         path: str | Path | None = None,
+        stage: str | None = None,
+        stage_label: str | None = None,
+        resolution: str | None = None,
+        details: Mapping[str, Any] | None = None,
     ) -> None:
         self.code = code
         self.path = Path(path) if path is not None else None
+        self.stage = stage
+        self.stage_label = stage_label
+        self.resolution = resolution
+        self.details = dict(details or {})
         super().__init__(message)
 
 

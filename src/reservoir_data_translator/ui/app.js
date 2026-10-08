@@ -6,6 +6,7 @@ const state = {
   file: null,
   result: null,
   running: false,
+  translationFile: null,
 };
 
 const elements = {
@@ -23,12 +24,17 @@ const elements = {
 };
 
 class APIError extends Error {
-  constructor(code, message, status, diagnostics = null) {
+  constructor(code, message, status, detail = {}) {
     super(message);
     this.name = "APIError";
     this.code = code;
     this.status = status;
-    this.diagnostics = diagnostics;
+    this.diagnostics = detail.diagnostics || null;
+    this.stage = detail.stage;
+    this.stageLabel = detail.stage_label;
+    this.resolution = detail.resolution;
+    this.context = detail.context;
+    this.deepseekTrace = detail.deepseek_trace;
   }
 }
 
@@ -82,7 +88,7 @@ function setSelectedFile(file) {
     return;
   }
   if (![...TEXT_EXTENSIONS, "xlsx", "pdf"].includes(extensionFor(file.name))) {
-    renderError("UNSUPPORTED_FILE", "当前支持 TXT、文本 DAT、JSON、CSV、XLSX 和原生文本 PDF。");
+    renderError("UNSUPPORTED_FILE", "当前支持 TXT、文本 DAT、JSON、CSV、XLSX 和PDF。");
     return;
   }
   state.file = file;
@@ -120,8 +126,12 @@ async function fileToSource(file) {
 }
 
 function openSelectedFile() {
-  if (!state.file) return;
-  const extension = extensionFor(state.file.name);
+  openLocalFile(state.file);
+}
+
+function openLocalFile(file) {
+  if (!file) return;
+  const extension = extensionFor(file.name);
   const previewTypes = {
     txt: "text/plain;charset=utf-8",
     dat: "text/plain;charset=utf-8",
@@ -129,8 +139,8 @@ function openSelectedFile() {
     csv: "text/csv;charset=utf-8",
   };
   const previewFile = previewTypes[extension]
-    ? new Blob([state.file], { type: previewTypes[extension] })
-    : state.file;
+    ? new Blob([file], { type: previewTypes[extension] })
+    : file;
   const objectUrl = URL.createObjectURL(previewFile);
   const opened = window.open(objectUrl, "_blank");
   if (!opened) {
@@ -160,7 +170,7 @@ async function postJson(path, body) {
       detail?.code || `HTTP_${response.status}`,
       detail?.message || "转换服务返回了无法解析的错误。",
       response.status,
-      detail?.diagnostics || null,
+      detail || {},
     );
   }
   return payload;
@@ -175,6 +185,7 @@ async function getJson(path) {
       detail?.code || `HTTP_${response.status}`,
       detail?.message || "无法读取 DeepSeek Trace。",
       response.status,
+      detail || {},
     );
   }
   return payload;
@@ -209,8 +220,387 @@ function renderLoading() {
     <div class="loading-state">
       <span class="loading-pulse" aria-hidden="true"></span>
       <div><p class="eyebrow">PIPELINE RUNNING</p><h2>正在建立可追溯语义链路</h2>
-      <p>解析原文、检索 Ontology 并生成结构化映射。这一步可能需要几秒。</p></div>
+      <p id="translation-progress" role="status">正在提交任务。OCR 中间结果生成后即可浏览。</p></div>
     </div>`;
+}
+
+function errorStageLabel(code, details) {
+  if (details?.stageLabel) return details.stageLabel;
+  if (code.startsWith("PDF_")) return "PDF 文件解析";
+  if (code.startsWith("SEMANTIC_") || code.startsWith("DEEPSEEK_")) return "语义映射";
+  if (code.startsWith("CANONICAL_")) return "Canonical 构建";
+  return "输入处理";
+}
+
+function renderOcrIntermediate(artifact) {
+  let panel = document.querySelector("#ocr-intermediate");
+  if (!artifact) {
+    panel?.remove();
+    return;
+  }
+  if (!panel) {
+    panel = document.createElement("section");
+    panel.id = "ocr-intermediate";
+    panel.className = "ocr-intermediate";
+    elements.resultRoot.before(panel);
+  }
+  // Polling must not reload a preview the user is already reading.
+  const key = `${artifact.artifact_id}:${artifact.status}`;
+  if (panel.dataset.artifactKey === key) {
+    if (artifact.review_url && !panel.querySelector("[data-ocr-review-download]")) {
+      const link = document.createElement("a");
+      link.dataset.ocrReviewDownload = "";
+      link.href = artifact.review_url;
+      link.textContent = "下载 OCR 审查记录";
+      panel.querySelector(".ocr-actions")?.append(link);
+    }
+    return;
+  }
+  panel.dataset.artifactKey = key;
+  const available = ["complete", "partial"].includes(artifact.status);
+  const partial = artifact.status === "partial";
+  panel.innerHTML = `
+    <h2>OCR 中间结果${partial ? " · 部分完成" : ""}</h2>
+    <p>${escapeHtml(artifact.file_name)} · 已识别 ${artifact.completed_pages.length} / ${artifact.total_pages} 页</p>
+    <p class="ocr-local-path">已保存到本地：${escapeHtml(artifact.local_path)}</p>
+    ${available ? `<div class="ocr-actions"><button type="button" class="button" data-ocr-original>浏览原始文件</button><a class="button" href="${escapeHtml(artifact.download_url)}">下载 OCR 中间结果</a><a href="${escapeHtml(artifact.raw_url)}" target="_blank" rel="noopener">下载原始 OCR JSON</a>${artifact.review_url ? `<a data-ocr-review-download href="${escapeHtml(artifact.review_url)}">下载 OCR 审查记录</a>` : ""}</div>
+    ${artifact.comparison_url ? `<details class="ocr-preview" data-ocr-comparison><summary>对照浏览源文件与 OCR 中间结果</summary><div data-ocr-comparison-body></div></details><p data-ocr-hint>红框对应 OCR block_bbox；页面外的 R 编号和类型对应原始识别区域。左右两栏同步滚动、缩放和翻页。</p>` : `<details class="ocr-preview"><summary>浏览 OCR 中间结果</summary><iframe title="OCR 原始识别结果 PDF" data-src="${escapeHtml(artifact.preview_url)}"></iframe></details>`}
+    ${artifact.source_regions_download_url ? `<a class="button" href="${escapeHtml(artifact.source_regions_download_url)}">下载源文件 OCR 区域红框</a>` : ""}` : `<p>中间 PDF 未能生成。${escapeHtml(artifact.error || "请检查服务日志。")}</p><a href="${escapeHtml(artifact.raw_url)}" target="_blank" rel="noopener">下载已保存的 OCR JSON</a>`}
+    <p>内容来自 OCR 输出，未经切片、语义映射或数字纠正。${partial ? `已完成原文页：${escapeHtml(artifact.completed_pages.join("、"))}；其余页面未完成。` : ""}</p>`;
+  panel.querySelector("[data-ocr-original]")?.addEventListener("click", () => openLocalFile(state.translationFile));
+  panel.querySelectorAll("details").forEach(details => details.addEventListener("toggle", () => {
+    const frame = details.querySelector("iframe");
+    if (frame && details.open && !frame.getAttribute("src")) frame.src = frame.dataset.src;
+    if (details.open && details.hasAttribute("data-ocr-comparison") && !details.dataset.loaded) {
+      details.dataset.loaded = "true";
+      loadOcrComparison(details, artifact).catch(error => {
+        details.dataset.loaded = "";
+        details.querySelector("[data-ocr-comparison-body]").textContent = `对照视图加载失败：${error.message}。请收起后重新打开。`;
+      });
+    }
+  }));
+}
+
+function drawOcrComparisonPage(figure, page, width, zoom, visible, interactive) {
+  const image = figure.querySelector("img");
+  const svg = figure.querySelector("svg");
+  const tags = figure.querySelector(".ocr-region-tags");
+  svg.replaceChildren();
+  tags.replaceChildren();
+  const regions = interactive ? (page.regions || []).filter(region =>
+    Array.isArray(region.bbox) && region.bbox.length === 4 &&
+    region.bbox.every(Number.isFinite) && region.bbox[2] > region.bbox[0] &&
+    region.bbox[3] > region.bbox[1]) : [];
+  const showTags = visible.number || visible.type;
+  const routes = [];
+  if (showTags) {
+    [...regions].sort((a, b) => a.bbox[1] - b.bbox[1]).forEach(region => {
+      routes.push({ region, ...OcrComparisonLayout.chooseOcrLeader(
+        region, regions, page.width, routes) });
+    });
+  }
+  const railWidth = 136 * zoom;
+  const leftRail = routes.some(route => route.side === "left") ? railWidth : 0;
+  const rightRail = routes.some(route => route.side === "right") ? railWidth : 0;
+  const imageWidth = Math.max(100, width - leftRail - rightRail);
+  const scale = imageWidth / page.width;
+  const imageHeight = page.height * scale;
+  const maxCount = Math.max(routes.filter(route => route.side === "left").length,
+    routes.filter(route => route.side === "right").length, 1);
+  const tagHeight = Math.max(16 * zoom, Math.min(25 * zoom, imageHeight / maxCount - 3 * zoom));
+  const gap = 3 * zoom;
+  routes.forEach(route => { route.anchor = route.y * scale; });
+  const height = Math.max(OcrComparisonLayout.positionOcrTags(routes, "left", imageHeight, tagHeight, gap),
+    OcrComparisonLayout.positionOcrTags(routes, "right", imageHeight, tagHeight, gap));
+  OcrComparisonLayout.assignOcrLeaderLanes(routes, "left", tagHeight, zoom);
+  OcrComparisonLayout.assignOcrLeaderLanes(routes, "right", tagHeight, zoom);
+  const stageWidth = leftRail + imageWidth + rightRail;
+  figure.style.width = `${stageWidth}px`;
+  figure.style.height = `${height}px`;
+  image.style.left = `${leftRail}px`;
+  image.style.width = `${imageWidth}px`;
+  image.style.height = `${imageHeight}px`;
+  svg.setAttribute("viewBox", `0 0 ${stageWidth} ${height}`);
+  svg.style.width = `${stageWidth}px`;
+  svg.style.height = `${height}px`;
+  const svgNs = "http://www.w3.org/2000/svg";
+  function addSvg(name, attributes) {
+    const element = document.createElementNS(svgNs, name);
+    Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, String(value)));
+    svg.append(element);
+  }
+  if (visible.boundary) {
+    regions.forEach(region => {
+      const [x0, top, x1, bottom] = region.bbox;
+      addSvg("rect", { x: leftRail + x0 * scale, y: top * scale,
+        width: (x1 - x0) * scale, height: (bottom - top) * scale,
+        class: "ocr-region-outline" });
+    });
+  }
+  routes.forEach(route => {
+    const [x0, , x1] = route.region.bbox;
+    const left = route.side === "left";
+    const tagX = left ? 0 : leftRail + imageWidth + 36 * zoom;
+    const tagWidth = railWidth - 36 * zoom;
+    const startX = left ? tagX + tagWidth : tagX;
+    const laneOffset = (5 + route.lane * 6) * zoom;
+    const bendX = left ? leftRail - laneOffset : leftRail + imageWidth + laneOffset;
+    const endX = left ? leftRail + x0 * scale : leftRail + x1 * scale;
+    addSvg("path", { d: `M ${startX} ${route.tagY + tagHeight / 2} H ${bendX} V ${route.anchor} H ${endX}`,
+      class: "ocr-region-leader" });
+    const tag = document.createElement("div");
+    tag.className = "ocr-region-tag";
+    tag.style.left = `${tagX}px`;
+    tag.style.top = `${route.tagY}px`;
+    tag.style.width = `${tagWidth}px`;
+    tag.style.height = `${tagHeight}px`;
+    tag.style.fontSize = `${Math.min(13, Math.max(9, tagHeight / zoom - 7)) * zoom}px`;
+    tag.title = `${route.region.number} · ${route.region.type}`;
+    if (visible.number) {
+      const number = document.createElement("span");
+      number.textContent = route.region.number;
+      tag.append(number);
+    }
+    if (visible.number && visible.type) {
+      const separator = document.createElement("span");
+      separator.textContent = " · ";
+      tag.append(separator);
+    }
+    if (visible.type) {
+      const type = document.createElement("span");
+      type.textContent = route.region.type;
+      tag.append(type);
+    }
+    tags.append(tag);
+  });
+}
+
+async function loadOcrComparison(details, artifact) {
+  const body = details.querySelector("[data-ocr-comparison-body]");
+  body.textContent = "正在加载对照视图…";
+  const data = await getJson(artifact.comparison_url);
+  if (!details.isConnected) return;
+  if (!data.interactive) {
+    details.parentElement.querySelector("[data-ocr-hint]").textContent =
+      "旧产物的红框与标签已经画入 PDF，仍按原样显示；左右两栏同步滚动、缩放和翻页。";
+  }
+  const sourcePage = (page, index) => data.interactive ? page.source_page : (artifact.completed_pages[index] ?? page.index);
+  body.innerHTML = `<div class="ocr-compare-toolbar"><button type="button" data-zoom-out aria-label="缩小两栏">−</button><span data-zoom-label>100%</span><button type="button" data-zoom-in aria-label="放大两栏">+</button><button type="button" data-zoom-reset>适合宽度</button><label>原文页 <select data-compare-page>${data.pages.map((page, i) => `<option value="${i}">${escapeHtml(sourcePage(page, i))}</option>`).join("")}</select></label>${data.interactive ? `<fieldset class="ocr-visibility"><legend>标注</legend><label><input type="checkbox" data-ocr-visible="boundary" checked>显示边界</label><label><input type="checkbox" data-ocr-visible="number" checked>显示编号</label><label><input type="checkbox" data-ocr-visible="type" checked>显示类型</label></fieldset>` : ""}<span>滚动 / Ctrl + 滚轮缩放，两栏同步</span></div><div class="ocr-compare-columns">${["source", "result"].map(kind => `<section><h3>${kind === "source" ? "源文件 · OCR 区域" : "OCR 中间结果 · 识别区域"}</h3><div class="ocr-compare-scroll" tabindex="0" aria-label="${kind === "source" ? "源文件" : "OCR 结果"}同步浏览"><div class="ocr-compare-pages">${data.pages.map((page, i) => `<figure data-page-index="${i}"><img loading="lazy" src="${escapeHtml(page[kind + "_url"])}" width="${page.width}" height="${page.height}" alt="原文第 ${escapeHtml(sourcePage(page, i))} 页${kind === "source" ? "源文件" : "OCR 结果"}"><svg aria-hidden="true"></svg><div class="ocr-region-tags"></div></figure>`).join("")}</div></div></section>`).join("")}</div>`;
+  const panes = [...body.querySelectorAll(".ocr-compare-scroll")];
+  const pageSelect = body.querySelector("[data-compare-page]");
+  let zoom = 1;
+  let syncing = false;
+  const visible = { boundary: true, number: true, type: true };
+  function syncScroll(from, to) {
+    if (syncing) return;
+    if (Math.abs(to.scrollTop - from.scrollTop) < 1 && Math.abs(to.scrollLeft - from.scrollLeft) < 1) return;
+    syncing = true;
+    to.scrollTop = from.scrollTop;
+    to.scrollLeft = from.scrollLeft;
+    syncing = false;
+  }
+  function setZoom(value) {
+    const firstFigure = [...panes[0].querySelectorAll("figure")].findLast(figure =>
+      figure.offsetTop <= panes[0].scrollTop + 16) || panes[0].querySelector("figure");
+    const pageIndex = Number(firstFigure.dataset.pageIndex);
+    const fraction = (panes[0].scrollTop - firstFigure.offsetTop) / Math.max(firstFigure.offsetHeight, 1);
+    const horizontal = panes[0].scrollLeft / Math.max(panes[0].scrollWidth, 1);
+    zoom = value;
+    const width = Math.max(100, Math.min(...panes.map(pane => pane.clientWidth)) - 24) * zoom;
+    syncing = true;
+    panes.forEach(pane => {
+      pane.querySelector(".ocr-compare-pages").style.width = `${width}px`;
+      pane.querySelectorAll("figure").forEach((figure, index) =>
+        drawOcrComparisonPage(figure, data.pages[index], width, zoom, visible, data.interactive));
+      const selected = pane.querySelectorAll("figure")[pageIndex];
+      pane.scrollTop = selected.offsetTop + fraction * selected.offsetHeight;
+      pane.scrollLeft = horizontal * pane.scrollWidth;
+    });
+    syncing = false;
+    body.querySelector("[data-zoom-label]").textContent = `${Math.round(zoom * 100)}%`;
+  }
+  body.querySelectorAll("[data-ocr-visible]").forEach(input => input.addEventListener("change", () => {
+    const key = input.dataset.ocrVisible;
+    Object.assign(visible, OcrComparisonLayout.updateOcrVisibility(visible, key, input.checked));
+    body.querySelectorAll("[data-ocr-visible]").forEach(control => {
+      control.checked = visible[control.dataset.ocrVisible];
+    });
+    setZoom(zoom);
+  }));
+  panes.forEach((pane, i) => {
+    pane.addEventListener("scroll", () => {
+      syncScroll(pane, panes[1 - i]);
+      const figures = [...pane.querySelectorAll("figure")];
+      const index = figures.findLastIndex(figure => figure.offsetTop - figures[0].offsetTop <= pane.scrollTop + 16);
+      pageSelect.value = String(Math.max(0, index));
+    });
+    pane.addEventListener("wheel", event => {
+      if (!event.ctrlKey) return;
+      event.preventDefault();
+      setZoom(Math.max(0.5, Math.min(3, zoom + (event.deltaY < 0 ? 0.1 : -0.1))));
+    }, { passive: false });
+    pane.querySelectorAll("img").forEach(img => img.addEventListener("error", () => {
+      const message = document.createElement("span");
+      message.className = "ocr-page-error";
+      message.textContent = "本页加载失败，请收起后重新打开对照视图。";
+      img.replaceWith(message);
+      details.dataset.loaded = "";
+    }));
+  });
+  body.querySelector("[data-zoom-out]").addEventListener("click", () => setZoom(Math.max(0.5, zoom - 0.1)));
+  body.querySelector("[data-zoom-in]").addEventListener("click", () => setZoom(Math.min(3, zoom + 0.1)));
+  body.querySelector("[data-zoom-reset]").addEventListener("click", () => setZoom(1));
+  pageSelect.addEventListener("change", () => panes.forEach(pane => {
+    const figures = pane.querySelectorAll("figure");
+    pane.scrollTop = figures[Number(pageSelect.value)].offsetTop - figures[0].offsetTop;
+  }));
+  const observer = new ResizeObserver(() => {
+    if (!details.isConnected) { observer.disconnect(); return; }
+    if (details.open) setZoom(zoom);
+  });
+  observer.observe(panes[0]);
+  setZoom(1);
+}
+
+function renderOcrReview(job, statusUrl) {
+  let panel = document.querySelector("#ocr-review");
+  if (!job || job.status !== "ocr_review_required") {
+    panel?.remove();
+    return;
+  }
+  const items = job.ocr_review?.items || [];
+  const reviewFingerprint = JSON.stringify(items.map(item => ({
+    issue: item.issue_id,
+    flags: item.flags || [],
+    source: item.source_image_url || "",
+  })));
+  if (panel?.dataset.taskId === job.task_id
+      && panel.dataset.reviewFingerprint === reviewFingerprint) return;
+  panel?.remove();
+  panel = document.createElement("section");
+  panel.id = "ocr-review";
+  panel.className = "ocr-review";
+  panel.dataset.taskId = job.task_id;
+  panel.dataset.reviewFingerprint = reviewFingerprint;
+  panel.innerHTML = `
+    <h2>OCR 与表格结构人工审查</h2>
+    <p>请检查原始图像、识别内容和候选子表。表格边界及上下文归属需逐项确认后才能继续。</p>
+    <div class="ocr-review-list">${items.map((item, index) => `
+      <article class="ocr-review-card" data-ocr-issue="${escapeHtml(item.issue_id)}">
+        <header><strong>${escapeHtml(item.number)} · 第 ${escapeHtml(item.page)} 页</strong>
+          <span>${escapeHtml(item.label)}</span><small>${escapeHtml(item.flags.join("、"))}</small>
+          <small>置信度 ${item.confidence == null ? "不可用" : `${Math.round(item.confidence * 100)}%`}</small></header>
+        <div class="ocr-review-evidence">
+          <div><h3>源文件区域</h3>${item.source_image_url
+            ? `<img loading="lazy" src="${escapeHtml(item.source_image_url)}" alt="第 ${escapeHtml(item.page)} 页 ${escapeHtml(item.number)} 的原始图像">${hasLowConfidenceFlag(item.flags) ? `<div class="ocr-review-source-actions"><a class="button button-secondary ocr-lab-send" target="_blank" rel="noopener" href="/ocr-lab?source=${encodeURIComponent(item.source_image_url)}&amp;artifact=${encodeURIComponent(job.ocr_intermediate?.artifact_id || "")}&amp;issue=${encodeURIComponent(item.issue_id)}&amp;page=${encodeURIComponent(item.page)}&amp;region=${encodeURIComponent(item.number)}&amp;confidence=${encodeURIComponent(item.confidence ?? "")}&amp;flags=${encodeURIComponent((item.flags || []).join(","))}">送到 OCR Lab 测试 <span aria-hidden="true">→</span></a></div>` : ""}`
+            : "<p>区域图像不可用；请使用上方对照视图核对。</p>"}</div>
+          <div><h3>OCR 原始块内容</h3><pre>${escapeHtml(item.raw_content || "（空）")}</pre></div>
+          <div><h3>进入后续流程的识别内容</h3><pre>${escapeHtml(item.recognized_content || "（空）")}</pre></div>
+        </div>
+        ${item.issue_type === "table_split" ? `
+          <div class="ocr-table-tree"><h3>候选子表</h3><pre>${escapeHtml(JSON.stringify(item.table_tree, null, 2))}</pre></div>
+          <fieldset><legend>拆分决定</legend>
+            ${item.flags.includes("TABLE_SPLIT_GEOMETRY_CONFLICT") ? "<p>候选边界冲突，不能直接确认；可排除或停止后复核。</p>" : `<label><input type="radio" name="ocr-decision-${index}" value="accept">确认候选叶子表</label>`}
+            <label><input type="radio" name="ocr-decision-${index}" value="exclude">排除表格映射，保留证据</label>
+          </fieldset>
+          <div class="ocr-table-context"><h3>文字上下文归属</h3>
+            ${(item.context_candidates || []).map((candidate, contextIndex) => `<div data-context-index="${contextIndex}">
+              <p>${escapeHtml(candidate.region_id)}：${escapeHtml(candidate.text)}</p>
+              <label><input type="checkbox" data-context-none>不属于这些子表</label>
+              ${(item.table_tree?.leaf_ids || []).map(leaf => `<label><input type="checkbox" data-context-leaf="${escapeHtml(leaf)}">${escapeHtml(leaf)}</label>`).join("")}
+            </div>`).join("") || "<p>没有独立的文字上下文候选。</p>"}</div>
+        ` : `<fieldset><legend>这个区域如何处理？</legend>
+          <label><input type="radio" name="ocr-decision-${index}" value="include">带入后续流程（接受当前识别）</label>
+          <label><input type="radio" name="ocr-decision-${index}" value="exclude">排除后续流程（保留原始证据）</label>
+        </fieldset>`}
+      </article>`).join("")}</div>
+    <div class="ocr-review-actions"><button type="button" data-ocr-stop>停止本次流程</button>
+      <button type="button" class="button button-primary" data-ocr-continue disabled>继续后续流程</button>
+      <span data-ocr-review-count>待决定 ${items.length} 项</span></div>
+    <p class="ocr-review-message" role="status"></p>`;
+  const intermediate = document.querySelector("#ocr-intermediate");
+  (intermediate || elements.resultRoot).after(panel);
+  const continueButton = panel.querySelector("[data-ocr-continue]");
+  const message = panel.querySelector(".ocr-review-message");
+  function decisions() {
+    return Object.fromEntries(items.flatMap((item, index) => {
+      if (item.issue_type === "table_split") return [];
+      const checked = panel.querySelector(`input[name="ocr-decision-${index}"]:checked`);
+      return checked ? [[item.issue_id, checked.value]] : [];
+    }));
+  }
+  function tableDecisions() {
+    return Object.fromEntries(items.flatMap((item, index) => {
+      if (item.issue_type !== "table_split") return [];
+      const card = panel.querySelector(`[data-ocr-issue="${CSS.escape(item.issue_id)}"]`);
+      const checked = card.querySelector(`input[name="ocr-decision-${index}"]:checked`);
+      if (!checked) return [];
+      const assignments = {};
+      for (const [contextIndex, candidate] of (item.context_candidates || []).entries()) {
+        const group = card.querySelector(`[data-context-index="${contextIndex}"]`);
+        const none = group.querySelector("[data-context-none]").checked;
+        const leaves = [...group.querySelectorAll("[data-context-leaf]:checked")]
+          .map(control => control.dataset.contextLeaf);
+        if (!none && !leaves.length && checked.value === "accept") return [];
+        assignments[candidate.region_id] = none ? [] : leaves;
+      }
+      return [[item.issue_id, { action: checked.value, context_assignments: assignments }]];
+    }));
+  }
+  panel.addEventListener("change", event => {
+    const group = event.target.closest?.("[data-context-index]");
+    if (group && event.target.checked) {
+      if (event.target.matches("[data-context-none]")) {
+        group.querySelectorAll("[data-context-leaf]").forEach(input => { input.checked = false; });
+      } else if (event.target.matches("[data-context-leaf]")) {
+        group.querySelector("[data-context-none]").checked = false;
+      }
+    }
+    const count = Object.keys(decisions()).length + Object.keys(tableDecisions()).length;
+    panel.querySelector("[data-ocr-review-count]").textContent = `已决定 ${count} / ${items.length} 项`;
+    continueButton.disabled = count !== items.length;
+  });
+  async function submit(action) {
+    panel.querySelectorAll("button, input").forEach(control => { control.disabled = true; });
+    message.textContent = action === "stop" ? "正在停止流程…" : "正在保存审查决定并继续…";
+    try {
+      await postJson(`${statusUrl}/ocr-review`, {
+        action, decisions: decisions(), table_decisions: tableDecisions(),
+      });
+      message.textContent = action === "stop" ? "本次流程已停止。" : "审查决定已保存，后续流程正在运行。";
+    } catch (error) {
+      panel.querySelectorAll("button, input").forEach(control => { control.disabled = false; });
+      continueButton.disabled = Object.keys(decisions()).length + Object.keys(tableDecisions()).length !== items.length;
+      message.textContent = error.message || "审查决定提交失败。";
+    }
+  }
+  panel.querySelector("[data-ocr-stop]").addEventListener("click", () => submit("stop"));
+  continueButton.addEventListener("click", () => submit("continue"));
+}
+
+function hasLowConfidenceFlag(flags) {
+  return (flags || []).some(flag =>
+    /(^|_)LOW(?:_[A-Z0-9]+)*_CONFIDENCE$/.test(String(flag).trim().toUpperCase())
+  );
+}
+
+async function waitForTranslation(statusUrl) {
+  for (;;) {
+    const job = await getJson(statusUrl);
+    renderOcrIntermediate(job.ocr_intermediate);
+    renderOcrReview(job, statusUrl);
+    renderAvailableDeepSeekTrace(job.deepseek_trace);
+    const progress = document.querySelector("#translation-progress");
+    const stages = { queued: "任务已排队，等待前一个任务完成。", ingest: "正在解析文件并判断是否需要 OCR。", ocr: `正在 OCR 识别，第 ${job.page || 1} / ${job.total_pages || "—"} 页。`, ocr_artifact: "OCR 中间结果已保存，正在整理识别结果。", ocr_review: "OCR 已完成，等待人工审查问题区域。", ocr_review_resuming: "OCR 审查已结束，正在恢复后续流程。", semantic_map: job.ocr_intermediate ? "OCR 已完成，正在进行语义映射；现在可以浏览 OCR 中间结果。" : "本文件未使用 OCR，正在进行语义映射。" };
+    if (progress) progress.textContent = stages[job.stage] || "正在完成转换。";
+    if (job.status === "completed") return job.result;
+    if (job.status === "stopped") return { stopped: true };
+    if (job.status === "failed") {
+      const error = { ...(job.error || {}), deepseek_trace: job.deepseek_trace || job.error?.deepseek_trace };
+      throw new APIError(error.code || "TRANSLATION_FAILED", error.message || "转换失败。", 422, error);
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 750));
+  }
 }
 
 function pipelineStageLabel(stage) {
@@ -241,7 +631,12 @@ function renderFailureLocation(location = {}) {
   return `<dl class="failure-location">${items.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd><code>${escapeHtml(value)}</code></dd></div>`).join("")}</dl>`;
 }
 
-function renderError(code, message, diagnostics = null) {
+function renderError(code, message, details = {}) {
+  const diagnostics = details?.diagnostics || (details?.failed_stage ? details : null);
+  const stageLabel = errorStageLabel(code, details);
+  const resolution = details?.resolution ? `<div class="error-resolution"><strong>建议处理方式</strong><p>${escapeHtml(details.resolution)}</p></div>` : "";
+  const context = details?.context ? `<details class="error-context"><summary>查看技术详情</summary><pre>${escapeHtml(JSON.stringify(details.context, null, 2))}</pre></details>` : "";
+  const traceSummary = diagnostics?.deepseek_trace || details?.deepseekTrace || details?.deepseek_trace;
   const failedStage = diagnostics?.failed_stage || "unknown";
   const trace = diagnostics?.trace || [];
   state.result = diagnostics ? {
@@ -255,12 +650,12 @@ function renderError(code, message, diagnostics = null) {
     <div class="error-state ${diagnostics ? "error-state-diagnostic" : ""}" role="alert">
       <span class="error-mark">!</span>
       <div class="error-summary"><p class="eyebrow">${escapeHtml(code)}</p><h2>本次转换未完成</h2>
-      <p>${escapeHtml(message)}</p>
+      <p class="error-stage"><strong>停止阶段：</strong>${escapeHtml(stageLabel)}</p><p>${escapeHtml(message)}</p>${resolution}${context}
       ${diagnostics ? `<div class="failure-stage"><span>阻断点</span><strong>${escapeHtml(pipelineStageLabel(failedStage))}</strong><small>转换 ID · ${escapeHtml(diagnostics.translation_id || "未生成")}</small></div>${renderFailureLocation(diagnostics.location)}` : ""}</div>
     </div>
     ${diagnostics ? `<section class="failure-diagnosis-section"><p class="step-label">PIPELINE DIAGNOSIS</p><h2>流程在这里停止</h2><p>前面的绿色阶段已经完成；红色阶段是本次阻断点。错误详情和位置保留在上方。</p><ol class="failure-trace">${renderTrace(trace)}</ol></section>` : ""}
-    ${renderDeepSeekTraceShell(diagnostics?.deepseek_trace)}`;
-  if (diagnostics) wireResultActions();
+    ${renderDeepSeekTraceShell(traceSummary)}`;
+  if (traceSummary) wireResultActions(traceSummary);
 }
 
 function reviewState(mapping) {
@@ -283,7 +678,7 @@ function renderMapping(mapping, index) {
       ? `<strong>候选 Concept</strong><code>${escapeHtml([...(mapping.candidate_concepts || []), ...(mapping.candidate_contexts || []).map(c => `${c.concept_id} (${semanticContextLabel(c.context)})`)].join(" · "))}</code>`
       : `<strong>未找到可验证 Concept</strong><code>DO NOT GUESS</code>`;
   const value = mapping.status === "MAPPED"
-    ? `${escapeHtml(typeof mapping.value === "object" ? JSON.stringify(mapping.value) : mapping.value)} ${escapeHtml(mapping.canonical_unit || mapping.source_unit || "")}`
+    ? `${escapeHtml(typeof mapping.value === "object" ? JSON.stringify(mapping.value) : mapping.value)} ${escapeHtml(mapping.source_unit || mapping.canonical_unit || "")}`
     : escapeHtml(mapping.source_text || "—");
   return `
     <article class="mapping-row" data-mapping-index="${index}">
@@ -366,6 +761,20 @@ function renderResultFailureDiagnosis(result) {
   </section>`;
 }
 
+function renderAvailableDeepSeekTrace(summary) {
+  if (!summary) return;
+  let panel = document.querySelector("#available-deepseek-trace");
+  if (!panel) {
+    panel = document.createElement("div");
+    panel.id = "available-deepseek-trace";
+    elements.resultRoot.appendChild(panel);
+  }
+  if (panel.dataset.traceUrl === summary.trace_url) return;
+  panel.dataset.traceUrl = summary.trace_url;
+  panel.innerHTML = renderDeepSeekTraceShell(summary);
+  wireResultActions(summary);
+}
+
 function renderDeepSeekTraceShell(summary) {
   if (!summary) return "";
   return `<section class="deepseek-trace-section">
@@ -427,6 +836,32 @@ function parsedPrompt(call) {
   } catch {
     return { system, input: null, correction: correctionText || null };
   }
+}
+
+function formatPromptInputForDisplay(prompt) {
+  if (typeof prompt !== "string") return JSON.stringify(prompt, null, 2);
+  const marker = "\nINPUT:\n";
+  const correctionMarker = "\nCORRECTION REQUIRED:\n";
+  const markerIndex = prompt.indexOf(marker);
+  if (markerIndex < 0) return prompt;
+
+  const system = prompt.slice(0, markerIndex);
+  const remainder = prompt.slice(markerIndex + marker.length);
+  const correctionIndex = remainder.indexOf(correctionMarker);
+  const inputText = correctionIndex < 0 ? remainder : remainder.slice(0, correctionIndex);
+  const correctionText = correctionIndex < 0 ? "" : remainder.slice(correctionIndex + correctionMarker.length);
+  const prettyJson = (value) => {
+    try {
+      return JSON.stringify(JSON.parse(value), null, 2);
+    } catch {
+      return value;
+    }
+  };
+
+  const formattedInput = `${system}${marker}${prettyJson(inputText)}`;
+  return correctionIndex < 0
+    ? formattedInput
+    : `${formattedInput}${correctionMarker}${prettyJson(correctionText)}`;
 }
 
 function groupDeepSeekCalls(calls) {
@@ -584,6 +1019,7 @@ function renderTraceAttempt(call, attemptNumber, previousCall = null) {
   const parsed = parsedResponseOutput(call);
   const formattedOutput = parsed.value === null ? parsed.outputText : JSON.stringify(parsed.value, null, 2);
   const requestInput = call.request_payload?.input || "";
+  const formattedRequestInput = formatPromptInputForDisplay(requestInput);
   const requestInstructions = call.request_payload?.instructions || "";
   const inputState = !previousCall
     ? "初始输入"
@@ -606,7 +1042,7 @@ function renderTraceAttempt(call, attemptNumber, previousCall = null) {
       <section><div class="trace-pane-heading"><h4>API 输出</h4><button type="button" data-trace-copy="output" data-trace-index="${call.trace_index}">复制输出</button></div><pre>${renderTraceCode(formattedOutput || "未返回 output_text。")}</pre></section>
       ${call.local_correction && validatedOutput ? `<section class="trace-normalized-output"><div class="trace-pane-heading"><h4>本地修正后的有效 JSON</h4><button type="button" data-trace-copy="validated" data-trace-index="${call.trace_index}">复制修正结果</button></div><pre>${renderTraceCode(validatedOutput)}</pre></section>` : ""}
       <details class="trace-semantic-prompt"><summary>语义视图：证据、候选与纠正指令</summary>${renderPromptSemanticView(call)}</details>
-      <details><summary>完整 Prompt / Input</summary><div class="trace-prompt-sections"><h5>Request Instructions</h5><pre>${escapeHtml(requestInstructions || "未提供。")}</pre><h5>Input</h5><pre>${escapeHtml(requestInput || "未提供。")}</pre></div></details>
+      <details><summary>完整 Prompt / Input</summary><div class="trace-prompt-sections"><h5>Request Instructions</h5><pre>${escapeHtml(requestInstructions || "未提供。")}</pre><div class="trace-pane-heading trace-prompt-pane-heading"><h5>Input</h5><button type="button" data-trace-download="prompt" data-trace-index="${call.trace_index}">下载格式化 Prompt Log</button></div><pre>${escapeHtml(formattedRequestInput || "未提供。")}</pre></div></details>
       <details><summary>原始 Request / Response</summary><div class="trace-payloads"><div><h4>Request</h4><pre>${escapeHtml(JSON.stringify(call.request_payload, null, 2))}</pre></div><div><h4>Response</h4><pre>${escapeHtml(JSON.stringify(call.response_payload, null, 2))}</pre></div></div></details>
     </div>
   </article>`;
@@ -676,17 +1112,22 @@ function emptyStage(message) {
   return `<div class="stage-empty"><span>—</span><p>${escapeHtml(message)}</p></div>`;
 }
 
+function hasExcludedEvidence(review) {
+  return Boolean(review?.excluded_count || review?.excluded_table_count);
+}
+
 function renderResult(result) {
   state.result = result;
   const mappings = result.semantic_mapping?.mappings || [];
   const annotations = result.semantic_mapping?.source_annotations || [];
   const reviewRequired = result.status === "review_required";
-  const railIndex = reviewRequired ? 2 : result.status === "success" ? 4 : 3;
+  const railIndex = reviewRequired ? 2 : ["success", "partial"].includes(result.status) ? 4 : 3;
   updateRail(railIndex);
   const mappedCount = mappings.filter((mapping) => mapping.status === "MAPPED").length;
   const unresolvedCount = mappings.length - mappedCount;
   const statusCopy = {
     success: ["转换完成", "success"],
+    partial: ["部分转换完成 · 已排除 OCR 区域", "warning"],
     review_required: ["等待人工审查", "warning"],
     validation_failed: ["Canonical 校验未通过", "danger"],
     export_failed: ["目标平台导出被阻断", "danger"],
@@ -700,6 +1141,7 @@ function renderResult(result) {
       <div><p class="eyebrow">TRANSLATION ${escapeHtml(result.translation_id?.slice(0, 8) || "REVIEWED")}</p><h2>${statusCopy[0]}</h2></div>
       <div class="result-metrics"><span><b>${mappings.length}</b> 映射项</span><span><b>${unresolvedCount}</b> 未解决</span><span class="status-pill status-${statusCopy[1]}">${escapeHtml(result.status)}</span></div>
     </header>
+    ${hasExcludedEvidence(result.ocr_review) ? `<div class="review-banner"><span>!</span><div><strong>这是包含源区域缺口的结果</strong><p>人工审查排除了 ${result.ocr_review.excluded_count || 0} 个 OCR 区域及 ${result.ocr_review.excluded_table_count || 0} 张表：${escapeHtml((result.ocr_review.excluded_regions || []).map(item => `第 ${item.page} 页 ${item.number}`).join("、"))}。后续阶段已按剩余证据运行；请在正式使用前核对缺失内容。</p></div></div>` : ""}
 
     ${renderResultFailureDiagnosis(result)}
 
@@ -720,7 +1162,7 @@ function renderResult(result) {
     </section>
 
     <section class="stage-section" id="canonical-result">
-      <div class="stage-heading"><span class="stage-number">04</span><div><p class="step-label">CANONICAL + VALIDATE</p><h2>平台无关数据模型</h2></div>${canonicalJson ? '<div class="section-actions"><button class="text-button" data-copy="canonical">复制 JSON</button><button class="text-button" data-download="canonical">下载</button></div>' : ""}</div>
+      <div class="stage-heading"><span class="stage-number">04</span><div><p class="step-label">CANONICAL + VALIDATE</p><h2>平台无关数据模型</h2></div>${canonicalJson && !hasExcludedEvidence(result.ocr_review) ? '<div class="section-actions"><button class="text-button" data-copy="canonical">复制 JSON</button><button class="text-button" data-download="canonical">下载</button></div>' : ""}</div>
       ${canonicalJson ? `<pre class="code-window json-code" id="canonical-code">${escapeHtml(canonicalJson)}</pre>` : emptyStage("安全门通过后才会构建 Canonical Model。")}
       <div class="validation-grid">
         ${renderValidationCard("L1–L3 Canonical Validation", result.validation)}
@@ -729,9 +1171,9 @@ function renderResult(result) {
     </section>
 
     <section class="stage-section target-section" id="target-result">
-      <div class="stage-heading"><span class="stage-number">05</span><div><p class="step-label">TARGET PLATFORM</p><h2>${escapeHtml(result.target?.platform?.toUpperCase() || selectedTarget().toUpperCase())} 生成结果</h2></div>${targetContent ? '<div class="section-actions"><button class="text-button" data-copy="target">复制文本</button><button class="text-button" data-download="target">下载文件</button></div>' : ""}</div>
+      <div class="stage-heading"><span class="stage-number">05</span><div><p class="step-label">TARGET PLATFORM</p><h2>${escapeHtml(result.target?.platform?.toUpperCase() || selectedTarget().toUpperCase())} 生成结果</h2></div>${targetContent && !hasExcludedEvidence(result.ocr_review) ? '<div class="section-actions"><button class="text-button" data-copy="target">复制文本</button><button class="text-button" data-download="target">下载文件</button></div>' : ""}</div>
       ${targetContent ? `<pre class="code-window target-code" id="target-code">${escapeHtml(targetContent)}</pre>` : emptyStage("导出校验通过后才会渲染目标格式；系统不会跳过上游问题。")}
-      ${targetContent ? '<p class="target-disclaimer">当前为 PoC 平台片段。Eclipse 井控输出仍需要宿主 Deck 的 WELSPECS / COMPDAT 上下文；CMG 为未验证版本的 IMEX-style 片段。</p>' : ""}
+      ${result.status === "partial" ? '<p class="target-disclaimer">此内容仅供检查处理流程，含已排除的 OCR 区域，不作为完整导出文件。</p>' : targetContent ? '<p class="target-disclaimer">当前为 PoC 平台片段。Eclipse 井控输出仍需要宿主 Deck 的 WELSPECS / COMPDAT 上下文；CMG 为未验证版本的 IMEX-style 片段。</p>' : ""}
     </section>
 
     ${renderDeepSeekTraceShell(result.deepseek_trace)}
@@ -757,7 +1199,8 @@ async function continueAfterReview() {
       exportResult = await postJson(`/export/${encodeURIComponent(targetPlatform)}`, { canonical_model: canonical });
     }
     const target = exportResult?.target || null;
-    const status = !validation.valid ? "validation_failed" : target ? "success" : "export_failed";
+    const status = !validation.valid ? "validation_failed" : target
+      ? (hasExcludedEvidence(state.result.ocr_review) ? "partial" : "success") : "export_failed";
     renderResult({
       ...state.result,
       status,
@@ -802,6 +1245,31 @@ function downloadText(content, fileName, type = "text/plain;charset=utf-8") {
   setTimeout(() => URL.revokeObjectURL(link.href), 0);
 }
 
+function promptLogText(trace, call) {
+  const request = call.request_payload || {};
+  const requestInstructions = request.instructions || "未提供。";
+  const formattedInput = formatPromptInputForDisplay(request.input || "") || "未提供。";
+  return [
+    "DeepSeek Prompt / Input",
+    `Translation: ${trace.translation_id || "unknown"}`,
+    `Block: ${call.source_block_id || "unknown"}`,
+    `Call: ${Number(call.trace_index) + 1}`,
+    `Reason: ${call.call_reason || "unknown"}`,
+    `Request ID: ${call.request_id || "unknown"}`,
+    "",
+    "=== REQUEST INSTRUCTIONS ===",
+    requestInstructions,
+    "",
+    "=== INPUT ===",
+    formattedInput,
+    "",
+  ].join("\n");
+}
+
+function safeLogFilePart(value) {
+  return String(value || "unknown").replace(/[^a-zA-Z0-9._-]+/g, "-");
+}
+
 async function copyWithFeedback(button, content) {
   await navigator.clipboard.writeText(content);
   const original = button.textContent;
@@ -810,6 +1278,19 @@ async function copyWithFeedback(button, content) {
 }
 
 function wireDeepSeekTraceDetail(detail, trace) {
+  detail.querySelectorAll('[data-trace-download="prompt"]').forEach((downloadButton) => {
+    downloadButton.addEventListener("click", (downloadEvent) => {
+      const call = trace.calls?.[Number(downloadEvent.currentTarget.dataset.traceIndex)];
+      if (!call) return;
+      const fileName = [
+        "prompt",
+        safeLogFilePart(trace.translation_id),
+        safeLogFilePart(call.source_block_id),
+        `call-${Number(call.trace_index) + 1}`,
+      ].join("-") + ".log";
+      downloadText(promptLogText(trace, call), fileName);
+    });
+  });
   detail.querySelectorAll("[data-trace-copy]").forEach((copyButton) => {
     copyButton.addEventListener("click", (copyEvent) => {
       const action = copyEvent.currentTarget.dataset.traceCopy;
@@ -860,7 +1341,7 @@ function wireDeepSeekTraceDetail(detail, trace) {
   });
 }
 
-function wireResultActions() {
+function wireResultActions(traceSummary = state.result?.deepseek_trace) {
   const reviewChecks = [...document.querySelectorAll("[data-review-index]")];
   const reviewButton = document.querySelector("#review-continue");
   reviewChecks.forEach((checkbox) => checkbox.addEventListener("change", () => {
@@ -883,8 +1364,8 @@ function wireResultActions() {
     detail.innerHTML = '<p class="trace-loading">正在读取本地 Trace 文件…</p>';
     try {
       const [trace, readableLog] = await Promise.all([
-        getJson(state.result.deepseek_trace.trace_url),
-        getText(state.result.deepseek_trace.readable_log_url),
+        getJson(traceSummary.trace_url),
+        getText(traceSummary.readable_log_url),
       ]);
       detail.innerHTML = renderDeepSeekTraceDetail(trace, readableLog);
       detail.dataset.loaded = "true";
@@ -918,9 +1399,12 @@ async function runTranslation() {
     return;
   }
   setRunning(true);
+  state.translationFile = state.file;
+  renderOcrIntermediate(null);
+  renderOcrReview(null);
   renderLoading();
   try {
-    const source = state.file ? await fileToSource(state.file) : {
+    const source = state.translationFile ? await fileToSource(state.translationFile) : {
       file_name: "source.txt",
       content: pasted,
       content_encoding: "utf-8",
@@ -932,15 +1416,18 @@ async function runTranslation() {
       schema_version: "0.1.0",
     };
     if (elements.sourceSystem.value) body.source_system = elements.sourceSystem.value;
-    const result = await postJson("/translate", body);
+    const job = await postJson("/translation-jobs", body);
+    const result = await waitForTranslation(job.status_url);
+    if (result.stopped) {
+      elements.resultRoot.className = "result-shell";
+      elements.resultRoot.innerHTML = '<div class="review-banner"><span>■</span><div><strong>本次流程已停止</strong><p>OCR 中间结果与审查决定已保留，后续阶段没有运行。</p></div></div>';
+      return;
+    }
+    renderOcrIntermediate(result.ocr_intermediate);
     renderResult(result);
     elements.resultRoot.scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (error) {
-    renderError(
-      error.code || "TRANSLATION_FAILED",
-      error.message || "转换过程中发生未知错误。",
-      error.diagnostics || null,
-    );
+    renderError(error.code || "TRANSLATION_FAILED", error.message || "转换过程中发生未知错误。", error);
   } finally {
     setRunning(false);
   }

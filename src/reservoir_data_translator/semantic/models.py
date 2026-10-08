@@ -182,7 +182,7 @@ class RelativePermeabilityStructuralValueDraft(CanonicalModel):
 
 
 MappedValueDraft = (
-    FiniteFloat
+    Annotated[FiniteFloat, Field(strict=True)]
     | NonEmptyString
     | PVTStructuralValueDraft
     | RelativePermeabilityStructuralValueDraft

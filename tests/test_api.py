@@ -1,4 +1,5 @@
 import base64
+import asyncio
 from io import BytesIO
 import json
 from pathlib import Path
@@ -7,10 +8,15 @@ from typing import Any
 import httpx
 from httpx import ASGITransport, AsyncClient
 import pytest
+from PIL import Image
 from openpyxl import Workbook
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.pdfencrypt import StandardEncryption
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
 from reservoir_data_translator.api import create_app
+from reservoir_data_translator.api.main import _default_pdf_parser
 from reservoir_data_translator.canonical import ReservoirSimulationModel
 from reservoir_data_translator.mappers import (
     CMGDemoMapper,
@@ -18,6 +24,120 @@ from reservoir_data_translator.mappers import (
     PlatformMappingRegistry,
 )
 from reservoir_data_translator.ontology import OntologyRegistry
+from reservoir_data_translator.ingestion import OcrEngine, OcrPageResult, OcrRegion, PaddleOcrBackend, PdfParser
+from reservoir_data_translator.ingestion.ocr.models import OcrTable, TableTree, TableTreeNode
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("review_action", ["stop", "exclude"])
+async def test_table_review_api_requires_explicit_split_and_context_decisions(
+    registry: OntologyRegistry, tmp_path, review_action,
+) -> None:
+    class Backend:
+        def analyze_page(self, image, *, page_number, languages):
+            width, height = image.size
+            root = (10, 50, width - 10, 150)
+            first = (10, 50, width / 2, 150)
+            second = (width / 2, 50, width - 10, 150)
+            table = OcrTable(["name", "value"], [["water", "1"]])
+            tree = TableTree("parent:tree", "parent", (
+                TableTreeNode("parent", None, root, 0, "split",
+                    ("parent.1", "parent.2"), table=table),
+                TableTreeNode("parent.1", "parent", first, 1, "leaf", table=table),
+                TableTreeNode("parent.2", "parent", second, 1, "leaf", table=table),
+            ), ("parent.1", "parent.2"), True,
+                ("TABLE_SPLIT_UNCALIBRATED", "TABLE_CONTEXT_REVIEW_REQUIRED"), "pending")
+            return OcrPageResult(page_number, width, height, (
+                OcrRegion("caption", "text", "table_title", (10, 10, 200, 40), 1,
+                    text="A15井采用定液生产制度，日产液控制在500方，井底流压不得低于80 bar。", confidence=.99),
+                OcrRegion("parent.1", "table", "table", first, 2, table=table,
+                    confidence=.99, quality_flags=("TABLE_SPLIT_REVIEW_REQUIRED",),
+                    parent_region_id="parent", table_tree_id=tree.tree_id),
+                OcrRegion("parent.2", "table", "table", second, 2, table=table,
+                    confidence=.99, quality_flags=("TABLE_SPLIT_REVIEW_REQUIRED",),
+                    parent_region_id="parent", table_tree_id=tree.tree_id),
+            ), "fake", table_trees=(tree,))
+
+    image_bytes = BytesIO()
+    Image.new("RGB", (100, 100), "white").save(image_bytes, format="PNG")
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=letter)
+    pdf.drawImage(ImageReader(BytesIO(image_bytes.getvalue())), 0, 0,
+                  width=letter[0], height=letter[1])
+    pdf.save()
+    client = _configured_client(registry, APIWellProvider(), pdf_parser=PdfParser(
+        ocr_backend=Backend(), ocr_render_dpi=72, ocr_artifact_dir=tmp_path,
+    ))
+    submitted = await client.post("/translation-jobs", json={
+        "source": {"file_name": "table.pdf", "content_encoding": "base64",
+                   "content": base64.b64encode(buffer.getvalue()).decode("ascii")},
+        "source_system": "client_c",
+        "target_platform": "cmg",
+    })
+    url = submitted.json()["status_url"]
+    for _ in range(150):
+        job = (await client.get(url)).json()
+        if job["status"] == "ocr_review_required":
+            break
+        await asyncio.sleep(.01)
+    assert job["status"] == "ocr_review_required", job
+    item = job["ocr_review"]["items"][0]
+    assert item["issue_type"] == "table_split"
+    assert item["table_tree"]["leaf_ids"] == ["parent.1", "parent.2"]
+    assert (await client.post(url + "/ocr-review", json={"action": "continue"})).status_code == 422
+    invalid = await client.post(url + "/ocr-review", json={
+        "action": "continue", "table_decisions": {item["issue_id"]: {
+            "action": "accept", "context_assignments": {"caption": ["unknown-leaf"]},
+        }},
+    })
+    assert invalid.status_code == 422
+    assert invalid.json()["detail"]["code"] == "OCR_TABLE_CONTEXT_INVALID"
+    if review_action == "stop":
+        stopped = await client.post(url + "/ocr-review", json={"action": "stop"})
+        assert stopped.status_code == 200
+    else:
+        resumed = await client.post(url + "/ocr-review", json={
+            "action": "continue", "table_decisions": {
+                item["issue_id"]: {"action": "exclude", "context_assignments": {"caption": []}}},
+        })
+        assert resumed.status_code == 200
+        for _ in range(150):
+            job = (await client.get(url)).json()
+            if job["status"] in {"completed", "failed"}:
+                break
+            await asyncio.sleep(.01)
+        assert job["status"] == "completed", job.get("error")
+        result = job["result"]
+        assert result["status"] == "partial"
+        assert result["ocr_review"]["excluded_count"] == 0
+        assert result["ocr_review"]["excluded_table_count"] == 1
+        assert not any(block["block_type"] == "table" for block in result["source"]["blocks"])
+    await client.aclose()
+
+
+def test_default_pdf_parser_uses_project_ocr_engine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("RESERVOIR_OCR_BACKEND", raising=False)
+    monkeypatch.delenv("RESERVOIR_OCR_DEVICE", raising=False)
+    # Test lazy configuration without requiring the optional runtime or models.
+    monkeypatch.setattr("reservoir_data_translator.ingestion.ocr.registry.find_spec", lambda name: object())
+    parser = _default_pdf_parser()
+    assert isinstance(parser.ocr_backend, OcrEngine)
+    assert parser.ocr_backend.registry.get("layout", "paddle-layout").device == "gpu:0"
+    assert parser.ocr_backend.minimum_confidence == .70
+
+
+def test_project_ocr_engine_respects_configured_confidence_threshold(monkeypatch) -> None:
+    monkeypatch.setenv("RESERVOIR_OCR_BACKEND", "reservoir")
+    monkeypatch.setenv("RESERVOIR_OCR_MIN_CONFIDENCE", "0.83")
+    assert _default_pdf_parser().ocr_backend.minimum_confidence == .83
+
+
+def test_default_pdf_parser_respects_explicit_cpu_device(monkeypatch) -> None:
+    monkeypatch.setenv("RESERVOIR_OCR_BACKEND", "paddleocr")
+    monkeypatch.setenv("RESERVOIR_OCR_DEVICE", "cpu")
+    assert _default_pdf_parser().ocr_backend.device == "cpu"
 
 
 @pytest.mark.asyncio
@@ -146,6 +266,7 @@ class FailingSemanticProvider(SemanticModelProvider):
 def _configured_client(
     registry: OntologyRegistry,
     provider: SemanticModelProvider | None = None,
+    pdf_parser: PdfParser | None = None,
 ):
     mappers = [
         EclipseDemoMapper(
@@ -170,6 +291,7 @@ def _configured_client(
         provider=provider,
         mappers=mappers,
         source_mappings=source_mappings,
+        pdf_parser=pdf_parser,
     )
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
@@ -319,6 +441,255 @@ async def test_ingest_accepts_base64_native_text_pdf(
     assert payload["blocks"][0]["source_region"]["page"] == 1
     assert payload["blocks"][0]["source_region"]["bbox"]["coordinate_system"] == (
         "pdf_top_left_points"
+    )
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_ingest_accepts_base64_scanned_pdf_with_configured_ocr(
+    registry: OntologyRegistry,
+) -> None:
+    class Backend:
+        def analyze_page(
+            self,
+            image,
+            *,
+            page_number: int,
+            languages: tuple[str, ...],
+        ) -> OcrPageResult:
+            width, height = image.size
+            return OcrPageResult(
+                page_number=page_number,
+                image_width=width,
+                image_height=height,
+                engine="api-fixture-ocr",
+                regions=(
+                    OcrRegion(
+                        region_id="body",
+                        region_type="text",
+                        layout_label="text",
+                        bbox_pixels=(10, 10, width - 10, height - 10),
+                        reading_order=1,
+                        text="Minimum BHP 80 bar",
+                        confidence=0.97,
+                    ),
+                ),
+            )
+
+    page_image = BytesIO()
+    Image.new("RGB", (100, 100), "white").save(page_image, format="PNG")
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=letter)
+    pdf.drawImage(
+        ImageReader(BytesIO(page_image.getvalue())),
+        0,
+        0,
+        width=letter[0],
+        height=letter[1],
+    )
+    pdf.save()
+    client = _configured_client(
+        registry,
+        APIWellProvider(),
+        pdf_parser=PdfParser(ocr_backend=Backend(), ocr_render_dpi=72),
+    )
+
+    response = await client.post(
+        "/ingest",
+        json={
+            "file_name": "scan.pdf",
+            "content_encoding": "base64",
+            "content": base64.b64encode(buffer.getvalue()).decode("ascii"),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["blocks"][0]["content"] == "Minimum BHP 80 bar"
+    assert payload["blocks"][0]["extraction_evidence"]["engine"] == (
+        "api-fixture-ocr"
+    )
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_ocr_review_job_stops_or_continues_only_after_region_decisions(
+    registry: OntologyRegistry, tmp_path,
+) -> None:
+    from reservoir_data_translator.ingestion.ocr.artifacts import active_artifact
+
+    class Backend:
+        def analyze_page(self, image, *, page_number: int, languages: tuple[str, ...]) -> OcrPageResult:
+            width, height = image.size
+            boxes = [(10, 10, 200, 50), (10, 60, width - 10, 120)]
+            contents = ["unreliable text", "A15井采用定液生产制度，日产液控制在500方，井底流压不得低于80 bar。"]
+            writer = active_artifact.get()
+            writer.record(page_number, {"parsing_res_list": [
+                {"block_id": index, "block_label": "text", "block_bbox": box,
+                 "block_content": contents[index]}
+                for index, box in enumerate(boxes)
+            ]}, image)
+            return OcrPageResult(
+                page_number=page_number, image_width=width, image_height=height,
+                engine="review-fixture", regions=tuple(
+                    OcrRegion(region_id=str(index), region_type="text", layout_label="text",
+                              bbox_pixels=box, reading_order=index + 1,
+                              text=contents[index], raw_content=contents[index],
+                              confidence=0.4 if index == 0 else 0.98,
+                              quality_flags=("LOW_TEXT_CONFIDENCE",) if index == 0 else (),
+                              source_region_index=index + 1)
+                    for index, box in enumerate(boxes)
+                ),
+            )
+
+    page_image = BytesIO()
+    Image.new("RGB", (100, 100), "white").save(page_image, format="PNG")
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=letter)
+    pdf.drawImage(ImageReader(BytesIO(page_image.getvalue())), 0, 0,
+                  width=letter[0], height=letter[1])
+    pdf.save()
+    request = {"source": {"file_name": "review.pdf", "content_encoding": "base64",
+                          "content": base64.b64encode(buffer.getvalue()).decode("ascii")},
+               "source_system": "client_c", "target_platform": "cmg"}
+    provider = APIWellProvider()
+    provider.calls = 0
+    client = _configured_client(registry, provider, pdf_parser=PdfParser(
+        ocr_backend=Backend(), ocr_render_dpi=72, ocr_artifact_dir=tmp_path,
+    ))
+
+    async def start_review():
+        submitted = await client.post("/translation-jobs", json=request)
+        assert submitted.status_code == 202
+        url = submitted.json()["status_url"]
+        for _ in range(150):
+            job = (await client.get(url)).json()
+            if job["status"] == "ocr_review_required":
+                return url, job
+            await asyncio.sleep(0.01)
+        pytest.fail(f"OCR review was not reached: {job}")
+
+    first_url, first = await start_review()
+    assert provider.calls == 0
+    item = first["ocr_review"]["items"][0]
+    assert (item["page"], item["number"], item["label"], item["block_id"]) == (1, "R1", "text", "0")
+    assert item["raw_content"] == "unreliable text"
+    assert item["recognized_content"] == "unreliable text"
+    assert item["source_image_url"]
+    source_image = await client.get(item["source_image_url"])
+    assert source_image.headers["content-type"] == "image/png"
+    geometry = json.loads(source_image.headers["x-reservoir-ocr-geometry"])
+    assert geometry["coordinate_space"] == "pdf_top_left_points"
+    assert geometry["render_dpi"] == 72
+    assert geometry["page_width_points"] == pytest.approx(letter[0])
+    assert geometry["page_height_points"] == pytest.approx(letter[1])
+    assert geometry["region_bbox_points"] == pytest.approx([10, 10, 200, 50])
+    assert geometry["crop_bbox_points"] == pytest.approx([6, 6, 204, 54])
+    assert geometry["region_bbox_pixels"] == pytest.approx([4, 4, 194, 44])
+    assert geometry["image_width_pixels"] == 198
+    assert geometry["image_height_pixels"] == 48
+    assert geometry["padding_points"] == 4
+    incomplete = await client.post(first_url + "/ocr-review", json={"action": "continue"})
+    assert incomplete.status_code == 422
+    stopped = await client.post(first_url + "/ocr-review", json={"action": "stop"})
+    assert stopped.status_code == 200
+    assert (await client.get(first_url)).json()["status"] == "stopped"
+    assert provider.calls == 0
+
+    second_url, second = await start_review()
+    issue_id = second["ocr_review"]["items"][0]["issue_id"]
+    continued = await client.post(second_url + "/ocr-review", json={
+        "action": "continue", "decisions": {issue_id: "exclude"},
+    })
+    assert continued.status_code == 200
+    for _ in range(150):
+        resumed = (await client.get(second_url)).json()
+        if resumed["status"] in {"completed", "failed"}:
+            break
+        await asyncio.sleep(0.01)
+    assert resumed["status"] == "completed", resumed.get("error")
+    assert resumed["result"]["status"] == "partial"
+    assert resumed["result"]["ocr_review"]["excluded_count"] == 1
+    saved_review = await client.get(resumed["ocr_intermediate"]["review_url"])
+    assert saved_review.status_code == 200
+    assert saved_review.json()["decisions"] == {issue_id: "exclude"}
+    assert all("unreliable text" not in str(block["content"])
+               for block in resumed["result"]["source"]["blocks"])
+    assert provider.calls > 0
+    audits = [json.loads(path.read_text(encoding="utf-8"))
+              for path in tmp_path.glob("*.review.json")]
+    assert {audit["action"] for audit in audits} == {"stop", "continue"}
+    assert next(audit for audit in audits if audit["action"] == "continue")["decisions"] == {
+        issue_id: "exclude",
+    }
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_ingest_automatically_ocrs_restricted_pdf(
+    registry: OntologyRegistry,
+) -> None:
+    class Backend:
+        def analyze_page(
+            self,
+            image,
+            *,
+            page_number: int,
+            languages: tuple[str, ...],
+        ) -> OcrPageResult:
+            width, height = image.size
+            return OcrPageResult(
+                page_number=page_number,
+                image_width=width,
+                image_height=height,
+                engine="restricted-fixture-ocr",
+                regions=(
+                    OcrRegion(
+                        region_id="body",
+                        region_type="text",
+                        layout_label="text",
+                        bbox_pixels=(10, 10, width - 10, height - 10),
+                        reading_order=1,
+                        text="Minimum BHP 80 bar",
+                        confidence=0.97,
+                    ),
+                ),
+            )
+
+    encryption = StandardEncryption(
+        "",
+        ownerPassword="fixture-owner",
+        canPrint=1,
+        canModify=0,
+        canCopy=0,
+        canAnnotate=0,
+    )
+    page_image = BytesIO()
+    Image.new("RGB", (100, 100), "white").save(page_image, format="PNG")
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=letter, encrypt=encryption)
+    pdf.drawImage(ImageReader(BytesIO(page_image.getvalue())), 72, 72, 240, 320)
+    pdf.save()
+    client = _configured_client(
+        registry,
+        APIWellProvider(),
+        pdf_parser=PdfParser(ocr_backend=Backend(), ocr_render_dpi=72),
+    )
+
+    response = await client.post(
+        "/ingest",
+        json={
+            "file_name": "restricted.pdf",
+            "content_encoding": "base64",
+            "content": base64.b64encode(buffer.getvalue()).decode("ascii"),
+        },
+    )
+
+    assert response.status_code == 200
+    block = response.json()["blocks"][0]
+    assert block["content"] == "Minimum BHP 80 bar"
+    assert "SOURCE_TEXT_EXTRACTION_RESTRICTED" in (
+        block["extraction_evidence"]["quality_flags"]
     )
     await client.aclose()
 
@@ -498,6 +869,62 @@ async def test_translate_generic_semantic_failure_returns_pipeline_diagnostics(
     assert detail["diagnostics"]["trace"][-1]["detail"].startswith(
         "DEEPSEEK_TIMEOUT:"
     )
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("endpoint", ["/translate", "/translation-jobs"])
+@pytest.mark.parametrize("failure_stage", ["semantic", "canonical"])
+async def test_failed_translation_exposes_saved_trace(registry, monkeypatch, tmp_path, endpoint, failure_stage):
+    from reservoir_data_translator.canonical import CanonicalBuilder, CanonicalBuildError
+
+    monkeypatch.setenv("DEEPSEEK_TRACE_DIR", str(tmp_path / "traces"))
+
+    async def handler(request):
+        mappings = await APIWellProvider().structured_generate("", object)
+        if failure_stage == "semantic":
+            for mapping in mappings["mappings"]:
+                if mapping.get("source_unit"):
+                    mapping["value"] = {"value": mapping["value"], "unit": mapping["source_unit"]}
+        return httpx.Response(200, json={"id": "failure-trace", "status": "completed",
+            "output": [{"type": "message", "role": "assistant", "content": [
+                {"type": "output_text", "text": json.dumps(mappings)}]}]})
+
+    if failure_stage == "canonical":
+        def fail_build(*args, **kwargs):
+            raise CanonicalBuildError("CANONICAL_MODEL_INVALID", "Missing pressure")
+        monkeypatch.setattr(CanonicalBuilder, "build", fail_build)
+
+    provider = DeepSeekProvider("test-key", transport=httpx.MockTransport(handler))
+    client = _configured_client(registry, provider)
+    response = await client.post(endpoint, json={
+        "source": "A15井采用定液生产制度，日产液控制在500方，井底流压不得低于80 bar。",
+        "source_system": "client_c", "target_platform": "cmg"})
+    if endpoint == "/translate":
+        assert response.status_code >= 400
+        error = response.json()["detail"]
+    else:
+        assert response.status_code == 202
+        for _ in range(100):
+            job = (await client.get(response.json()["status_url"])).json()
+            if job["status"] == "failed":
+                break
+            await asyncio.sleep(0.01)
+        assert job["status"] == "failed"
+        error = job["error"]
+        assert job["deepseek_trace"] == error["deepseek_trace"]
+    summary = error["deepseek_trace"]
+    trace_response = await client.get(summary["trace_url"])
+    assert trace_response.status_code == 200
+    calls = trace_response.json()["calls"]
+    assert summary["api_requests"] == (2 if failure_stage == "semantic" else 1)
+    if failure_stage == "semantic":
+        assert error["code"] == "DEEPSEEK_SCHEMA_MISMATCH"
+        assert calls[-1]["call_reason"] == "output_retry"
+        assert calls[-1]["error_code"] == error["code"]
+    else:
+        assert error["code"] == "CANONICAL_MODEL_INVALID"
+    assert (await client.get(summary["readable_log_url"])).status_code == 200
     await client.aclose()
 
 

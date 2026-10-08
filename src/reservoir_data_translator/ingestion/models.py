@@ -15,6 +15,7 @@ from pydantic import Field, model_validator
 
 from reservoir_data_translator.canonical.models import (
     CanonicalModel,
+    Confidence,
     FiniteFloat,
     NonEmptyString,
 )
@@ -29,6 +30,21 @@ from reservoir_data_translator.canonical.models import (
         }
 '''
 BlockType = Literal["text", "table", "key_value", "figure"]
+
+
+class ExtractionEvidence(CanonicalModel):
+    """How a format-level block was extracted from its source evidence."""
+
+    method: NonEmptyString
+    engine: NonEmptyString | None = None
+    engine_version: NonEmptyString | None = None
+    model_version: NonEmptyString | None = None
+    languages: list[NonEmptyString] = Field(default_factory=list)
+    confidence: Confidence | None = None
+    layout_label: NonEmptyString | None = None
+    render_dpi: Annotated[int, Field(ge=1)] | None = None
+    preprocessing: list[NonEmptyString] = Field(default_factory=list)
+    quality_flags: list[NonEmptyString] = Field(default_factory=list)
 
 
 class BoundingBox(CanonicalModel):
@@ -62,6 +78,19 @@ class CharacterSpan(CanonicalModel):
         return self
 
 
+class SourceRegionPart(CanonicalModel):
+    """Original extraction region contributing evidence or context to a chunk."""
+
+    region_id: NonEmptyString
+    bbox: BoundingBox
+    extraction_method: NonEmptyString
+    text: str | None = None
+    source_span: CharacterSpan | None = None
+    role: Literal["evidence", "context"] = "evidence"
+    confidence: Confidence | None = None
+    quality_flags: list[NonEmptyString] = Field(default_factory=list)
+
+
 class SourceRegion(CanonicalModel):
     """Structured provenance for one format-level block or bounded child block."""
 
@@ -69,6 +98,7 @@ class SourceRegion(CanonicalModel):
     parent_region_id: NonEmptyString
     page: Annotated[int, Field(ge=1)]
     bbox: BoundingBox
+    parts: list[SourceRegionPart] = Field(default_factory=list)
     reading_order: Annotated[int, Field(ge=1)]
     extraction_method: NonEmptyString
     source_span: CharacterSpan | None = None
@@ -94,8 +124,10 @@ class RawBlock(CanonicalModel):
     block_id: NonEmptyString
     block_type: BlockType
     content: Any
+    section_title: str | None = None
     source_location: NonEmptyString | None = None
     source_region: SourceRegion | None = None
+    extraction_evidence: ExtractionEvidence | None = None
 
     @model_validator(mode="after")
     def validate_content_shape(self) -> "RawBlock":
@@ -113,7 +145,7 @@ class RawBlock(CanonicalModel):
         """Return a deterministic textual projection for retrieval and prompts."""
 
         if isinstance(self.content, str):
-            return self.content
+            return (self.section_title + "\n" if self.section_title else "") + self.content
         return json.dumps(
             self.content,
             ensure_ascii=False,
